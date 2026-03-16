@@ -44,144 +44,103 @@ def _detect_and_load_excel(uploaded_file):
         return df
 
 
-def _detect_csv_format(uploaded_file):
-    """Detecta el formato del CSV: separador, si tiene encabezados, y número de columnas."""
-    if hasattr(uploaded_file, 'seek'):
-        uploaded_file.seek(0)
-
-    # Leer las primeras líneas
-    if hasattr(uploaded_file, 'read'):
-        sample = uploaded_file.read(4096)
-        uploaded_file.seek(0)
-        if isinstance(sample, bytes):
-            sample = sample.decode('utf-8', errors='replace')
-    else:
-        sample = str(uploaded_file)
-
-    first_line = sample.split('\n')[0]
-
-    # Detectar separador
-    if first_line.count(';') > first_line.count(','):
-        sep = ';'
-    else:
-        sep = ','
-
-    # Detectar si tiene encabezados
-    has_header = 'DOC_ID' in first_line.upper() or 'FECHA_NEGOCIO' in first_line.upper()
-
-    # Contar columnas
-    n_cols = len(first_line.split(sep))
-
-    return sep, has_header, n_cols
-
-
-def _load_csv_chunked(uploaded_file, st_ref, sep, has_header, n_cols):
-    """Carga un CSV grande por chunks, limpiando cada chunk para ahorrar memoria."""
-    st_ref.write("Procesando archivo grande por bloques para optimizar memoria...")
-
-    # Determinar nombres de columnas y columnas a usar
-    if n_cols == 32 and not has_header:
-        # Archivo original del ERP con 32 columnas sin encabezados
-        usecols = ESSENTIAL_COLS_IDX
-        col_names = ESSENTIAL_COLS_NAMES
-        header_param = None
-        names_param = COLUMN_HEADERS
-    elif has_header:
-        usecols = None
-        col_names = None
-        header_param = 0
-        names_param = None
-    else:
-        usecols = None
-        col_names = None
-        header_param = None
-        names_param = COLUMN_HEADERS[:n_cols] if n_cols <= len(COLUMN_HEADERS) else None
-
-    chunks_list = []
-    total_raw = 0
-    total_clean = 0
-    chunk_size = 300000
-
-    try:
-        reader = pd.read_csv(
-            uploaded_file, sep=sep, header=header_param, names=names_param,
-            usecols=usecols, encoding='utf-8', low_memory=False,
-            chunksize=chunk_size
-        )
-    except Exception:
-        if hasattr(uploaded_file, 'seek'):
-            uploaded_file.seek(0)
-        reader = pd.read_csv(
-            uploaded_file, sep=sep, header=header_param, names=names_param,
-            usecols=usecols, encoding='latin-1', low_memory=False,
-            chunksize=chunk_size
-        )
-
-    for i, chunk in enumerate(reader):
-        total_raw += len(chunk)
-
-        # Si usamos usecols con índices, renombrar columnas
-        if col_names and len(chunk.columns) == len(col_names):
-            chunk.columns = col_names
-
-        # Limpieza rápida del chunk
-        chunk = _clean_chunk(chunk)
-        total_clean += len(chunk)
-        chunks_list.append(chunk)
-
-        if (i + 1) % 5 == 0:
-            st_ref.write(f"  Procesados {total_raw:,} registros ({total_clean:,} válidos)...")
-
-    df = pd.concat(chunks_list, ignore_index=True)
-    st_ref.write(f"Archivo procesado: {total_raw:,} registros leídos, {total_clean:,} válidos")
-    return df
-
-
 def _clean_chunk(df):
     """Limpia un chunk de datos: convierte tipos, filtra anulados y no comerciales."""
-    # Convertir fechas
     if 'DOC_FECHA' in df.columns:
         df['DOC_FECHA'] = pd.to_datetime(df['DOC_FECHA'], errors='coerce')
     if 'FECHA_NEGOCIO' in df.columns:
         df['FECHA_NEGOCIO'] = pd.to_datetime(df['FECHA_NEGOCIO'], errors='coerce')
         df = df.dropna(subset=['FECHA_NEGOCIO'])
 
-    # Filtrar anuladas
     if 'DOC_ANULADA' in df.columns:
         df['DOC_ANULADA'] = pd.to_numeric(df['DOC_ANULADA'], errors='coerce').fillna(0).astype(int)
         df = df[df['DOC_ANULADA'] == 0]
 
-    # Filtrar no comerciales
     if 'D_MAJOR' in df.columns:
         df['D_MAJOR'] = pd.to_numeric(df['D_MAJOR'], errors='coerce')
         df = df[df['D_MAJOR'] != 6]
 
-    # Convertir numéricos
     for col in ['D_CANTIDAD', 'D_VALOR']:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    # Filtrar valores <= 0
     if 'D_VALOR' in df.columns:
         df = df[df['D_VALOR'] > 0]
 
     return df
 
 
-def _load_pre_cleaned_csv(uploaded_file, st_ref):
-    """Carga un CSV que ya fue pre-limpiado (tiene encabezados con nombres conocidos)."""
-    st_ref.write("Detectado archivo pre-limpiado. Cargando...")
+def _load_csv_chunked(file_source, st_ref, compression=None):
+    """Carga un CSV (o CSV.GZ) por chunks usando pandas."""
+    st_ref.write("Procesando archivo por bloques para optimizar memoria...")
+
+    # Primero leer una muestra para detectar formato
+    if hasattr(file_source, 'seek'):
+        file_source.seek(0)
+
+    try:
+        sample_df = pd.read_csv(file_source, nrows=3, compression=compression,
+                                sep=None, engine='python', header='infer')
+        detected_cols = list(sample_df.columns)
+    except Exception:
+        if hasattr(file_source, 'seek'):
+            file_source.seek(0)
+        sample_df = pd.read_csv(file_source, nrows=3, compression=compression,
+                                sep=';', header=None)
+        detected_cols = []
+
+    if hasattr(file_source, 'seek'):
+        file_source.seek(0)
+
+    # Determinar si tiene encabezados conocidos
+    known_cols = {'DOC_ID', 'DOC_FECHA', 'FECHA_NEGOCIO', 'D_VALOR', 'D_ITEM'}
+    cols_upper = [str(c).upper().strip() for c in detected_cols]
+    has_known_header = bool(known_cols.intersection(set(cols_upper)))
+
+    n_cols = len(detected_cols) if detected_cols else sample_df.shape[1]
 
     chunks_list = []
-    total = 0
-    for chunk in pd.read_csv(uploaded_file, chunksize=300000, low_memory=False):
-        total += len(chunk)
+    total_raw = 0
+    total_clean = 0
+    chunk_size = 300000
+
+    if has_known_header:
+        # Archivo con encabezados conocidos (pre-limpiado o con headers)
+        st_ref.write("Detectado archivo con encabezados. Cargando por bloques...")
+        reader = pd.read_csv(file_source, chunksize=chunk_size, low_memory=False,
+                             compression=compression)
+    elif n_cols == 32:
+        # Archivo original del ERP sin encabezados (32 columnas, separador ;)
+        st_ref.write("Detectado archivo ERP (32 columnas). Cargando solo columnas esenciales...")
+        reader = pd.read_csv(file_source, sep=';', header=None, names=COLUMN_HEADERS,
+                             usecols=ESSENTIAL_COLS_IDX, chunksize=chunk_size,
+                             low_memory=False, encoding='utf-8', compression=compression)
+    else:
+        # Formato desconocido - intentar auto-detectar
+        st_ref.write("Detectando formato del archivo...")
+        reader = pd.read_csv(file_source, sep=None, engine='python', header='infer',
+                             chunksize=chunk_size, low_memory=False, compression=compression)
+
+    for i, chunk in enumerate(reader):
+        total_raw += len(chunk)
+
+        # Si es ERP con usecols, renombrar columnas
+        if not has_known_header and n_cols == 32 and len(chunk.columns) == len(ESSENTIAL_COLS_NAMES):
+            chunk.columns = ESSENTIAL_COLS_NAMES
+
+        # Limpiar chunk
+        chunk = _clean_chunk(chunk)
+        total_clean += len(chunk)
         chunks_list.append(chunk)
-        if len(chunks_list) % 5 == 0:
-            st_ref.write(f"  Cargados {total:,} registros...")
+
+        if (i + 1) % 3 == 0:
+            st_ref.write(f"  Procesados {total_raw:,} registros ({total_clean:,} válidos)...")
+
+    if not chunks_list:
+        raise ValueError("No se pudieron leer datos del archivo.")
 
     df = pd.concat(chunks_list, ignore_index=True)
-    st_ref.write(f"Archivo cargado: {total:,} registros")
+    st_ref.write(f"Archivo procesado: {total_raw:,} leídos, {total_clean:,} válidos")
     return df
 
 
@@ -192,38 +151,24 @@ def run_etl(uploaded_file, st_ref, file_type='csv'):
     if file_type == 'xlsx':
         df = _detect_and_load_excel(uploaded_file)
         df = _clean_chunk(df)
+
     elif file_type == 'csv_gz':
         # Archivo comprimido con gzip
+        # Usar pandas con compression='gzip' directamente (eficiente en memoria)
+        st_ref.write("Descomprimiendo y procesando archivo .gz...")
         if hasattr(uploaded_file, 'read'):
-            content = uploaded_file.read()
-            decompressed = gzip.decompress(content)
-            uploaded_file = io.BytesIO(decompressed)
-        sep, has_header, n_cols = _detect_csv_format(uploaded_file)
-        if has_header:
-            df = _load_pre_cleaned_csv(uploaded_file, st_ref)
+            # Streamlit UploadedFile - obtener los bytes
+            raw_bytes = uploaded_file.read()
+            file_source = io.BytesIO(raw_bytes)
         else:
-            df = _load_csv_chunked(uploaded_file, st_ref, sep, has_header, n_cols)
-            df = _clean_chunk(df)
+            file_source = uploaded_file
+        df = _load_csv_chunked(file_source, st_ref, compression='gzip')
+
     else:
         # CSV normal
-        sep, has_header, n_cols = _detect_csv_format(uploaded_file)
-
-        # Si es un archivo pre-limpiado (tiene encabezados conocidos y pocas columnas)
-        if has_header and n_cols <= 12:
-            df = _load_pre_cleaned_csv(uploaded_file, st_ref)
-            # Asegurar tipos correctos
-            if 'FECHA_NEGOCIO' in df.columns:
-                df['FECHA_NEGOCIO'] = pd.to_datetime(df['FECHA_NEGOCIO'], errors='coerce')
-            if 'DOC_FECHA' in df.columns:
-                df['DOC_FECHA'] = pd.to_datetime(df['DOC_FECHA'], errors='coerce')
-            for col in ['D_CANTIDAD', 'D_VALOR']:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        else:
-            # Archivo grande del ERP - procesar por chunks
-            if hasattr(uploaded_file, 'seek'):
-                uploaded_file.seek(0)
-            df = _load_csv_chunked(uploaded_file, st_ref, sep, has_header, n_cols)
+        if hasattr(uploaded_file, 'seek'):
+            uploaded_file.seek(0)
+        df = _load_csv_chunked(uploaded_file, st_ref, compression=None)
 
     st_ref.write(f"Datos después de limpieza: {df.shape[0]:,} filas x {df.shape[1]} columnas")
 
@@ -236,6 +181,8 @@ def run_etl(uploaded_file, st_ref, file_type='csv'):
 
     # Crear columnas temporales
     if 'FECHA_NEGOCIO' in df.columns:
+        if not pd.api.types.is_datetime64_any_dtype(df['FECHA_NEGOCIO']):
+            df['FECHA_NEGOCIO'] = pd.to_datetime(df['FECHA_NEGOCIO'], errors='coerce')
         df['anio'] = df['FECHA_NEGOCIO'].dt.year
         df['mes'] = df['FECHA_NEGOCIO'].dt.month
         df['dia'] = df['FECHA_NEGOCIO'].dt.day
@@ -243,6 +190,8 @@ def run_etl(uploaded_file, st_ref, file_type='csv'):
         df['periodo'] = df['FECHA_NEGOCIO'].dt.to_period('M')
 
     if 'DOC_FECHA' in df.columns:
+        if not pd.api.types.is_datetime64_any_dtype(df['DOC_FECHA']):
+            df['DOC_FECHA'] = pd.to_datetime(df['DOC_FECHA'], errors='coerce')
         df['hora'] = df['DOC_FECHA'].dt.hour.fillna(0).astype(int)
     else:
         df['hora'] = 0
