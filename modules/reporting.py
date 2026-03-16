@@ -1,15 +1,115 @@
 import pandas as pd
 import numpy as np
 import io
-import base64
 import tempfile
 import os
 from datetime import datetime
+import matplotlib
+matplotlib.use('Agg')  # Backend sin GUI, funciona en servidores
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 
-def fig_to_png_bytes(fig, width=700, height=400):
-    """Convierte un gráfico Plotly a bytes PNG."""
-    return fig.to_image(format="png", width=width, height=height)
+def _plot_pronostico(df_mensual_hist, df_pronostico, tmp_dir):
+    """Genera gráfico de pronóstico vs histórico con matplotlib."""
+    fig, ax = plt.subplots(figsize=(10, 4.5), dpi=120)
+
+    # Histórico
+    ax.plot(df_mensual_hist['ds'], df_mensual_hist['y'], 'o-',
+            color='#2E86AB', linewidth=2, markersize=4, label='Ventas Históricas')
+
+    # Pronóstico
+    ax.plot(df_pronostico['ds'], df_pronostico['yhat'], 's--',
+            color='#E8630A', linewidth=2, markersize=5, label='Pronóstico')
+
+    # Intervalo de confianza
+    if 'yhat_lower' in df_pronostico.columns and 'yhat_upper' in df_pronostico.columns:
+        ax.fill_between(df_pronostico['ds'],
+                        df_pronostico['yhat_lower'], df_pronostico['yhat_upper'],
+                        alpha=0.2, color='#E8630A', label='Intervalo de Confianza')
+
+    ax.set_title('Pronóstico de Ventas vs. Histórico', fontsize=13, fontweight='bold', color='#333')
+    ax.set_xlabel('Mes', fontsize=10)
+    ax.set_ylabel('Ventas ($)', fontsize=10)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+    fig.autofmt_xdate(rotation=45)
+    plt.tight_layout()
+
+    path = os.path.join(tmp_dir, 'pronostico.png')
+    fig.savefig(path, bbox_inches='tight')
+    plt.close(fig)
+    return path
+
+
+def _plot_top_productos(df_limpios, top_n, tmp_dir):
+    """Genera gráfico de top productos con matplotlib."""
+    df_top = df_limpios.groupby('D_ITEM')['D_VALOR'].sum().reset_index()
+    df_top = df_top.sort_values('D_VALOR', ascending=True).tail(top_n)
+
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=120)
+    colors = plt.cm.Oranges(np.linspace(0.3, 0.9, len(df_top)))
+    ax.barh(df_top['D_ITEM'].astype(str), df_top['D_VALOR'], color=colors)
+    ax.set_title(f'Top {top_n} Productos por Ventas', fontsize=13, fontweight='bold', color='#333')
+    ax.set_xlabel('Ventas Totales ($)', fontsize=10)
+    ax.tick_params(axis='y', labelsize=8)
+    ax.grid(True, axis='x', alpha=0.3)
+    plt.tight_layout()
+
+    path = os.path.join(tmp_dir, 'top_productos.png')
+    fig.savefig(path, bbox_inches='tight')
+    plt.close(fig)
+    return path
+
+
+def _plot_patron_horario(df_limpios, tmp_dir):
+    """Genera gráfico de patrón horario con matplotlib."""
+    df_horario = df_limpios.groupby('hora')['D_VALOR'].sum().reset_index()
+
+    fig, ax = plt.subplots(figsize=(10, 4), dpi=120)
+    colors = plt.cm.GnBu(np.linspace(0.3, 0.9, len(df_horario)))
+    ax.bar(df_horario['hora'], df_horario['D_VALOR'], color=colors)
+    ax.set_title('Distribución de Ventas por Hora del Día', fontsize=13, fontweight='bold', color='#333')
+    ax.set_xlabel('Hora', fontsize=10)
+    ax.set_ylabel('Ventas Totales ($)', fontsize=10)
+    ax.grid(True, axis='y', alpha=0.3)
+    plt.tight_layout()
+
+    path = os.path.join(tmp_dir, 'patron_horario.png')
+    fig.savefig(path, bbox_inches='tight')
+    plt.close(fig)
+    return path
+
+
+def _plot_yoy(df_limpios, tmp_dir):
+    """Genera gráfico año sobre año con matplotlib."""
+    df_yoy = df_limpios.copy()
+    df_yoy['anio'] = df_yoy['FECHA_NEGOCIO'].dt.year
+    df_yoy['mes'] = df_yoy['FECHA_NEGOCIO'].dt.month
+    df_yoy_agg = df_yoy.groupby(['anio', 'mes'])['D_VALOR'].sum().reset_index()
+
+    fig, ax = plt.subplots(figsize=(10, 4.5), dpi=120)
+    colors = ['#2E86AB', '#E8630A', '#A23B72', '#F18F01', '#155724']
+    for i, (anio, grupo) in enumerate(df_yoy_agg.groupby('anio')):
+        color = colors[i % len(colors)]
+        ax.plot(grupo['mes'], grupo['D_VALOR'], 'o-', color=color,
+                linewidth=2, markersize=5, label=str(anio))
+
+    ax.set_title('Comparación de Ventas: Año sobre Año', fontsize=13, fontweight='bold', color='#333')
+    ax.set_xlabel('Mes', fontsize=10)
+    ax.set_ylabel('Ventas ($)', fontsize=10)
+    ax.set_xticks(range(1, 13))
+    ax.set_xticklabels(['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
+                        'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'])
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+
+    path = os.path.join(tmp_dir, 'yoy.png')
+    fig.savefig(path, bbox_inches='tight')
+    plt.close(fig)
+    return path
 
 
 def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ventas,
@@ -117,7 +217,7 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
 
 def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
                     meta_ventas, alerta_cumplimiento, df_limpios, top_n, st_ref):
-    """Genera el reporte ejecutivo en PDF usando fpdf2."""
+    """Genera el reporte ejecutivo en PDF usando fpdf2 y matplotlib para gráficos."""
     from fpdf import FPDF
 
     st_ref.write("Generando reporte ejecutivo...")
@@ -134,21 +234,32 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         alerta_cumplimiento, top_n, patron_horario_df
     )
 
-    # Guardar gráficos como archivos temporales PNG
+    # --- Generar gráficos con matplotlib (no necesita Kaleido ni Chrome) ---
     tmp_dir = tempfile.mkdtemp()
     chart_files = {}
+
     try:
-        for name, fig in [('pronostico', figs_modelos.get('pronostico_vs_historico')),
-                          ('top_productos', figs_eda.get('top_productos')),
-                          ('patron_horario', figs_eda.get('patron_horario')),
-                          ('yoy', figs_eda.get('yoy'))]:
-            if fig is not None:
-                path = os.path.join(tmp_dir, f'{name}.png')
-                fig.write_image(path, width=750, height=400)
-                chart_files[name] = path
+        # Obtener datos históricos mensuales para el gráfico de pronóstico
+        df_mensual_hist = df_limpios.groupby(df_limpios['FECHA_NEGOCIO'].dt.to_period('M')).agg(
+            y=('D_VALOR', 'sum')
+        ).reset_index()
+        df_mensual_hist.columns = ['ds', 'y']
+        df_mensual_hist['ds'] = df_mensual_hist['ds'].dt.to_timestamp()
+
+        chart_files['pronostico'] = _plot_pronostico(df_mensual_hist, df_pronostico, tmp_dir)
+        st_ref.write("  Gráfico de pronóstico generado.")
+
+        chart_files['top_productos'] = _plot_top_productos(df_limpios, top_n, tmp_dir)
+        st_ref.write("  Gráfico de productos generado.")
+
+        chart_files['patron_horario'] = _plot_patron_horario(df_limpios, tmp_dir)
+        st_ref.write("  Gráfico de patrón horario generado.")
+
+        chart_files['yoy'] = _plot_yoy(df_limpios, tmp_dir)
+        st_ref.write("  Gráfico año sobre año generado.")
+
     except Exception as e:
-        st_ref.warning(f"No se pudieron generar imagenes para el PDF: {e}. "
-                       f"Instala kaleido con: pip install kaleido")
+        st_ref.warning(f"Error al generar algunos gráficos: {e}")
 
     # KPIs
     pronostico_prox = df_pronostico['yhat'].iloc[0]
@@ -165,7 +276,7 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
 
     # Encabezado
     pdf.set_font('Helvetica', 'B', 20)
-    pdf.set_text_color(46, 134, 171)  # #2E86AB
+    pdf.set_text_color(46, 134, 171)
     pdf.cell(0, 12, 'Reporte Ejecutivo de Ventas y Pronostico', new_x="LMARGIN", new_y="NEXT", align='C')
     pdf.set_font('Helvetica', '', 10)
     pdf.set_text_color(100, 100, 100)
@@ -178,11 +289,10 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
 
     # --- Resumen Ejecutivo (KPIs) ---
     pdf.set_font('Helvetica', 'B', 14)
-    pdf.set_text_color(162, 59, 114)  # #A23B72
+    pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Resumen Ejecutivo', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # KPI boxes
     kpi_data = [
         ('Pronostico Prox. Mes', f'${pronostico_prox:,.2f}'),
         ('Meta de Ventas', f'${meta_ventas:,.2f}'),
@@ -195,26 +305,22 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     for i, (label, value) in enumerate(kpi_data):
         x = start_x + i * col_width
         pdf.set_xy(x, pdf.get_y())
-        # Box background
         pdf.set_fill_color(249, 249, 249)
-        pdf.set_draw_color(241, 143, 1)  # #F18F01
+        pdf.set_draw_color(241, 143, 1)
         pdf.rect(x, pdf.get_y(), col_width - 2, 18, style='DF')
-        # Left border accent
         pdf.set_fill_color(241, 143, 1)
         pdf.rect(x, pdf.get_y(), 2, 18, style='F')
-        # Label
         pdf.set_xy(x + 4, pdf.get_y() + 2)
         pdf.set_font('Helvetica', '', 7)
         pdf.set_text_color(136, 136, 136)
         pdf.cell(col_width - 6, 4, label, new_x="LMARGIN", new_y="NEXT")
-        # Value
         pdf.set_xy(x + 4, pdf.get_y())
         pdf.set_font('Helvetica', 'B', 11)
         if 'Cumplimiento' in label:
             if cumplimiento >= alerta_cumplimiento:
-                pdf.set_text_color(21, 87, 36)  # green
+                pdf.set_text_color(21, 87, 36)
             else:
-                pdf.set_text_color(114, 28, 36)  # red
+                pdf.set_text_color(114, 28, 36)
         else:
             pdf.set_text_color(51, 51, 51)
         pdf.cell(col_width - 6, 6, value)
@@ -226,7 +332,7 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Pronostico de Ventas vs. Historico', new_x="LMARGIN", new_y="NEXT")
     if 'pronostico' in chart_files:
-        pdf.image(chart_files['pronostico'], x=15, w=180)
+        pdf.image(chart_files['pronostico'], x=10, w=190)
     pdf.ln(5)
 
     # --- Tabla de Comparación de Modelos ---
@@ -235,7 +341,6 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.cell(0, 10, 'Comparacion de Modelos', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    # Header
     pdf.set_font('Helvetica', 'B', 9)
     pdf.set_fill_color(46, 134, 171)
     pdf.set_text_color(255, 255, 255)
@@ -245,7 +350,6 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.cell(col_widths_models[i], 8, h, border=1, fill=True, align='C')
     pdf.ln()
 
-    # Rows
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(51, 51, 51)
     for _, row in df_comparacion.iterrows():
@@ -274,8 +378,8 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font('Helvetica', '', 9)
     pdf.set_text_color(51, 51, 51)
     for _, row in df_pronostico.iterrows():
-        lower = f"${row['yhat_lower']:,.2f}" if pd.notna(row['yhat_lower']) else "N/A"
-        upper = f"${row['yhat_upper']:,.2f}" if pd.notna(row['yhat_upper']) else "N/A"
+        lower = f"${row['yhat_lower']:,.2f}" if pd.notna(row.get('yhat_lower')) else "N/A"
+        upper = f"${row['yhat_upper']:,.2f}" if pd.notna(row.get('yhat_upper')) else "N/A"
         pdf.cell(col_widths_pron[0], 7, row['ds'].strftime('%Y-%m'), border=1, align='C')
         pdf.cell(col_widths_pron[1], 7, f"${row['yhat']:,.2f}", border=1, align='C')
         pdf.cell(col_widths_pron[2], 7, lower, border=1, align='C')
@@ -289,7 +393,7 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Analisis de Productos', new_x="LMARGIN", new_y="NEXT")
     if 'top_productos' in chart_files:
-        pdf.image(chart_files['top_productos'], x=15, w=180)
+        pdf.image(chart_files['top_productos'], x=10, w=190)
     pdf.ln(5)
 
     # --- Gráfico Patrón Horario ---
@@ -297,15 +401,16 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Analisis Operativo: Patron Horario', new_x="LMARGIN", new_y="NEXT")
     if 'patron_horario' in chart_files:
-        pdf.image(chart_files['patron_horario'], x=15, w=180)
+        pdf.image(chart_files['patron_horario'], x=10, w=190)
     pdf.ln(5)
 
     # --- Gráfico Año sobre Año ---
+    pdf.add_page()
     pdf.set_font('Helvetica', 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Comparacion Ano sobre Ano', new_x="LMARGIN", new_y="NEXT")
     if 'yoy' in chart_files:
-        pdf.image(chart_files['yoy'], x=15, w=180)
+        pdf.image(chart_files['yoy'], x=10, w=190)
     pdf.ln(5)
 
     # --- Recomendaciones ---
@@ -316,10 +421,10 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.ln(3)
 
     color_map = {
-        'Positivo': (212, 237, 218),    # green
-        'Alerta': (248, 215, 218),      # red
-        'Estrategico': (204, 229, 255), # blue
-        'Operativo': (255, 243, 205)    # yellow
+        'Positivo': (212, 237, 218),
+        'Alerta': (248, 215, 218),
+        'Estrategico': (204, 229, 255),
+        'Operativo': (255, 243, 205)
     }
     text_color_map = {
         'Positivo': (21, 87, 36),
@@ -333,13 +438,11 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         bg = color_map.get(tipo, (240, 240, 240))
         tc = text_color_map.get(tipo, (51, 51, 51))
 
-        # Header
         pdf.set_fill_color(*bg)
         pdf.set_text_color(*tc)
         pdf.set_font('Helvetica', 'B', 10)
         pdf.cell(0, 8, f"  {rec['titulo']}", new_x="LMARGIN", new_y="NEXT", fill=True, border=1)
 
-        # Body
         pdf.set_fill_color(250, 250, 250)
         pdf.set_text_color(51, 51, 51)
         pdf.set_font('Helvetica', '', 9)
@@ -350,8 +453,10 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.ln(10)
     pdf.set_font('Helvetica', 'I', 8)
     pdf.set_text_color(153, 153, 153)
-    pdf.cell(0, 5, 'Reporte generado automaticamente por el Sistema de Inteligencia de Negocios', align='C', new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 5, 'Los pronosticos son estimaciones basadas en datos historicos y estan sujetos a variabilidad.', align='C')
+    pdf.cell(0, 5, 'Reporte generado automaticamente por el Sistema de Inteligencia de Negocios',
+             align='C', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 5, 'Los pronosticos son estimaciones basadas en datos historicos y estan sujetos a variabilidad.',
+             align='C')
 
     # Exportar a buffer
     pdf_buffer = io.BytesIO()
@@ -362,13 +467,12 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     for f in chart_files.values():
         try:
             os.remove(f)
-        except:
+        except Exception:
             pass
     try:
         os.rmdir(tmp_dir)
-    except:
+    except Exception:
         pass
 
     st_ref.success("Reporte ejecutivo generado exitosamente.")
-
     return pdf_buffer
