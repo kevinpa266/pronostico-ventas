@@ -7,12 +7,6 @@ import os
 from datetime import datetime
 
 
-def fig_to_base64(fig, width=700, height=400):
-    """Convierte un gráfico Plotly a imagen base64 para el PDF."""
-    img_bytes = fig.to_image(format="png", width=width, height=height)
-    return base64.b64encode(img_bytes).decode()
-
-
 def fig_to_png_bytes(fig, width=700, height=400):
     """Convierte un gráfico Plotly a bytes PNG."""
     return fig.to_image(format="png", width=width, height=height)
@@ -45,7 +39,7 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
 
     # --- Regla 2: Tendencia ---
     pronostico_promedio = df_pronostico['yhat'].mean()
-    historico_promedio = df_limpios.groupby(df_limpios['FECHA_NEGOCIO'].dt.to_period('M'))['D_TOTAL'].sum().mean()
+    historico_promedio = df_limpios.groupby(df_limpios['FECHA_NEGOCIO'].dt.to_period('M'))['D_VALOR'].sum().mean()
 
     if pronostico_promedio < historico_promedio * 0.95:
         recomendaciones.append({
@@ -64,9 +58,9 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
         })
 
     # --- Regla 3: Concentración de productos (Pareto) ---
-    df_pareto = df_limpios.groupby('D_ITEM')['D_TOTAL'].sum().reset_index()
-    df_pareto = df_pareto.sort_values('D_TOTAL', ascending=False)
-    df_pareto['pct_acum'] = (df_pareto['D_TOTAL'].cumsum() / df_pareto['D_TOTAL'].sum()) * 100
+    df_pareto = df_limpios.groupby('D_ITEM')['D_VALOR'].sum().reset_index()
+    df_pareto = df_pareto.sort_values('D_VALOR', ascending=False)
+    df_pareto['pct_acum'] = (df_pareto['D_VALOR'].cumsum() / df_pareto['D_VALOR'].sum()) * 100
     n_80 = df_pareto[df_pareto['pct_acum'] <= 80].shape[0]
     total_prod = len(df_pareto)
     top5 = ", ".join(df_pareto['D_ITEM'].head(5).tolist())
@@ -80,7 +74,7 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
     })
 
     # --- Regla 4: Productos de baja rotación ---
-    ventas_por_prod = df_limpios.groupby('D_ITEM')['D_TOTAL'].sum()
+    ventas_por_prod = df_limpios.groupby('D_ITEM')['D_VALOR'].sum()
     umbral_bajo = ventas_por_prod.quantile(0.1)
     n_baja_rotacion = (ventas_por_prod <= umbral_bajo).sum()
 
@@ -131,7 +125,7 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     # Obtener patrón horario
     patron_horario_df = None
     if 'patron_horario' in figs_eda:
-        patron_horario_df = df_limpios.groupby('hora')['D_TOTAL'].sum().reset_index()
+        patron_horario_df = df_limpios.groupby('hora')['D_VALOR'].sum().reset_index()
         patron_horario_df.columns = ['hora', 'ventas_total']
 
     # Generar recomendaciones
@@ -159,7 +153,7 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     # KPIs
     pronostico_prox = df_pronostico['yhat'].iloc[0]
     cumplimiento = (pronostico_prox / meta_ventas) * 100
-    promedio_hist = df_limpios.groupby(df_limpios['FECHA_NEGOCIO'].dt.to_period('M'))['D_TOTAL'].sum().mean()
+    promedio_hist = df_limpios.groupby(df_limpios['FECHA_NEGOCIO'].dt.to_period('M'))['D_VALOR'].sum().mean()
 
     fecha_gen = datetime.now().strftime('%Y-%m-%d %H:%M')
     periodo = f"{df_pronostico['ds'].iloc[0].strftime('%Y-%m')} a {df_pronostico['ds'].iloc[-1].strftime('%Y-%m')}"

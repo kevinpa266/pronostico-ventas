@@ -34,7 +34,7 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
     st_ref.plotly_chart(fig_tendencia, use_container_width=True)
 
     # --- 2. Estacionalidad mensual ---
-    df_estacional = df_limpios.groupby('mes')['D_TOTAL'].mean().reset_index()
+    df_estacional = df_limpios.groupby('mes')['D_VALOR'].mean().reset_index()
     df_estacional.columns = ['mes', 'promedio_ventas']
     meses_nombres = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun',
                      'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
@@ -52,7 +52,7 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
     st_ref.plotly_chart(fig_estacional, use_container_width=True)
 
     # --- 3. Patrón horario ---
-    df_horario = df_limpios.groupby('hora')['D_TOTAL'].sum().reset_index()
+    df_horario = df_limpios.groupby('hora')['D_VALOR'].sum().reset_index()
     df_horario.columns = ['hora', 'ventas_total']
 
     fig_horario = px.bar(
@@ -67,7 +67,7 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
     dfs['patron_horario'] = df_horario
 
     # --- 4. Top N productos ---
-    df_top = df_limpios.groupby('D_ITEM')['D_TOTAL'].sum().reset_index()
+    df_top = df_limpios.groupby('D_ITEM')['D_VALOR'].sum().reset_index()
     df_top.columns = ['D_ITEM', 'ventas_total']
     df_top = df_top.sort_values('ventas_total', ascending=False).head(top_n)
 
@@ -84,7 +84,7 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
     dfs['top_productos'] = df_top
 
     # --- 5. Pareto ---
-    df_pareto = df_limpios.groupby('D_ITEM')['D_TOTAL'].sum().reset_index()
+    df_pareto = df_limpios.groupby('D_ITEM')['D_VALOR'].sum().reset_index()
     df_pareto.columns = ['D_ITEM', 'ventas_total']
     df_pareto = df_pareto.sort_values('ventas_total', ascending=False)
     df_pareto['pct_acumulado'] = (df_pareto['ventas_total'].cumsum() / df_pareto['ventas_total'].sum()) * 100
@@ -98,19 +98,19 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
     df_yoy = df_limpios.copy()
     df_yoy['anio'] = df_yoy['FECHA_NEGOCIO'].dt.year
     df_yoy['mes'] = df_yoy['FECHA_NEGOCIO'].dt.month
-    df_yoy_agg = df_yoy.groupby(['anio', 'mes'])['D_TOTAL'].sum().reset_index()
+    df_yoy_agg = df_yoy.groupby(['anio', 'mes'])['D_VALOR'].sum().reset_index()
 
     fig_yoy = px.line(
-        df_yoy_agg, x='mes', y='D_TOTAL', color='anio',
+        df_yoy_agg, x='mes', y='D_VALOR', color='anio',
         title='Comparación de Ventas: Año sobre Año',
-        labels={'D_TOTAL': 'Ventas ($)', 'mes': 'Mes', 'anio': 'Año'},
+        labels={'D_VALOR': 'Ventas ($)', 'mes': 'Mes', 'anio': 'Año'},
         template='plotly_white', markers=True
     )
     fig_yoy.update_layout(height=400)
     figs['yoy'] = fig_yoy
 
     # --- 7. Ventas por familia ---
-    df_fam = df_limpios.groupby('D_FAMILY')['D_TOTAL'].sum().reset_index()
+    df_fam = df_limpios.groupby('D_FAMILY')['D_VALOR'].sum().reset_index()
     df_fam.columns = ['D_FAMILY', 'ventas_total']
     df_fam = df_fam.sort_values('ventas_total', ascending=False).head(10)
 
@@ -124,7 +124,7 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
 
     # --- 8. Patrón por día de la semana ---
     dias_nombres = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo']
-    df_dia_sem = df_limpios.groupby('dia_semana')['D_TOTAL'].mean().reset_index()
+    df_dia_sem = df_limpios.groupby('dia_semana')['D_VALOR'].mean().reset_index()
     df_dia_sem.columns = ['dia_semana', 'promedio_ventas']
     df_dia_sem['dia_nombre'] = df_dia_sem['dia_semana'].apply(lambda x: dias_nombres[int(x)] if 0 <= x <= 6 else str(x))
 

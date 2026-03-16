@@ -16,7 +16,10 @@ st.sidebar.header("Parámetros de Configuración")
 
 # --- Carga de archivo ---
 st.sidebar.subheader("1. Cargar Datos")
-uploaded_file = st.sidebar.file_uploader("Sube tu archivo CSV de ventas (datakv.csv)", type=["csv"])
+uploaded_file = st.sidebar.file_uploader(
+    "Sube tu archivo de ventas (CSV o Excel)",
+    type=["csv", "xlsx", "xls"]
+)
 
 # --- Parámetros del modelo ---
 st.sidebar.subheader("2. Parámetros del Reporte")
@@ -27,11 +30,18 @@ top_n_productos = st.sidebar.slider("Top N Productos a Mostrar", min_value=5, ma
 
 if uploaded_file is not None:
     try:
+        # Detectar tipo de archivo
+        file_name = uploaded_file.name.lower()
+        if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
+            file_type = 'xlsx'
+        else:
+            file_type = 'csv'
+
         with st.spinner("Procesando archivo... Esto puede tardar varios minutos."):
             # --- 1. ETL ---
             st.write("### 1. Limpieza y Transformación de Datos (ETL)")
             with st.expander("Ver detalles del proceso ETL"):
-                df_limpios, df_mensual, df_diario, df_producto, df_familia = run_etl(uploaded_file, st)
+                df_limpios, df_mensual, df_diario, df_producto, df_familia = run_etl(uploaded_file, st, file_type)
 
             # --- 2. EDA ---
             st.write("### 2. Análisis Exploratorio de Datos (EDA)")
@@ -73,7 +83,7 @@ if uploaded_file is not None:
 
     except Exception as e:
         st.error(f"Ocurrió un error durante el procesamiento: {e}")
-        st.error("Por favor, verifica que el formato del archivo CSV sea el correcto y vuelve a intentarlo.")
+        st.error("Por favor, verifica que el formato del archivo sea el correcto y vuelve a intentarlo.")
 
 else:
-    st.info("Por favor, sube un archivo CSV para comenzar el análisis.")
+    st.info("Por favor, sube un archivo CSV o Excel para comenzar el análisis.")
