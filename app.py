@@ -28,61 +28,113 @@ metodo_carga = st.sidebar.radio(
 uploaded_file = None
 file_type = 'csv'
 
+
+def _detect_file_type(name):
+    """Detecta el tipo de archivo por su nombre."""
+    name = name.lower()
+    if name.endswith('.csv.gz') or name.endswith('.gz'):
+        return 'csv_gz'
+    elif name.endswith('.xlsx') or name.endswith('.xls'):
+        return 'xlsx'
+    else:
+        return 'csv'
+
+
+def _download_gdrive_large(file_id):
+    """Descarga archivos grandes de Google Drive manejando la confirmación de virus scan."""
+    session = requests.Session()
+    base_url = "https://drive.google.com/uc?export=download"
+
+    # Primera solicitud
+    response = session.get(base_url, params={'id': file_id}, stream=True, timeout=30)
+
+    # Buscar token de confirmación para archivos grandes
+    confirm_token = None
+    for key, value in response.cookies.items():
+        if key.startswith('download_warning'):
+            confirm_token = value
+            break
+
+    if confirm_token:
+        response = session.get(base_url, params={'id': file_id, 'confirm': confirm_token},
+                               stream=True, timeout=30)
+
+    # Si no hay token en cookies, intentar con confirm=t
+    if response.headers.get('Content-Type', '').startswith('text/html'):
+        response = session.get(base_url, params={'id': file_id, 'confirm': 't'},
+                               stream=True, timeout=30)
+
+    return response
+
+
 if metodo_carga == "Subir archivo":
     uploaded_file = st.sidebar.file_uploader(
-        "Sube tu archivo de ventas (CSV o Excel)",
-        type=["csv", "xlsx", "xls"]
+        "Sube tu archivo de ventas",
+        type=["csv", "xlsx", "xls", "gz"],
+        help="Formatos: CSV, Excel, CSV comprimido (.csv.gz). Máximo 1 GB."
     )
     if uploaded_file is not None:
-        file_name = uploaded_file.name.lower()
-        if file_name.endswith('.xlsx') or file_name.endswith('.xls'):
-            file_type = 'xlsx'
-        else:
-            file_type = 'csv'
+        file_type = _detect_file_type(uploaded_file.name)
 
 else:
     url_input = st.sidebar.text_input(
-        "Pega la URL del archivo (Google Drive, Dropbox, etc.)",
-        placeholder="https://drive.google.com/file/d/.../view"
+        "Pega la URL del archivo",
+        placeholder="https://drive.google.com/file/d/.../view",
+        help="Compatible con Google Drive, Dropbox, OneDrive (enlace público)"
     )
     if url_input:
         try:
-            with st.spinner("Descargando archivo desde URL..."):
-                # Convertir URL de Google Drive a enlace de descarga directa
+            with st.spinner("Descargando archivo desde URL... Esto puede tardar unos minutos para archivos grandes."):
+                # Google Drive
                 gdrive_match = re.search(r'drive\.google\.com/file/d/([a-zA-Z0-9_-]+)', url_input)
                 if gdrive_match:
                     file_id = gdrive_match.group(1)
-                    download_url = f"https://drive.google.com/uc?export=download&id={file_id}&confirm=t"
-                # Convertir URL de Dropbox
+                    response = _download_gdrive_large(file_id)
+                # Dropbox
                 elif 'dropbox.com' in url_input:
                     download_url = url_input.replace('dl=0', 'dl=1').replace('www.dropbox.com', 'dl.dropboxusercontent.com')
+                    response = requests.get(download_url, timeout=300, stream=True)
                 else:
-                    download_url = url_input
+                    response = requests.get(url_input, timeout=300, stream=True)
 
-                response = requests.get(download_url, timeout=120, stream=True)
                 response.raise_for_status()
 
-                content = response.content
+                # Descargar por chunks para archivos grandes
+                chunks = []
+                total_size = 0
+                progress_bar = st.sidebar.progress(0, text="Descargando...")
+                content_length = int(response.headers.get('content-length', 0))
+
+                for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
+                    if chunk:
+                        chunks.append(chunk)
+                        total_size += len(chunk)
+                        if content_length > 0:
+                            progress = min(total_size / content_length, 1.0)
+                            progress_bar.progress(progress, text=f"Descargando... {total_size/1024/1024:.0f} MB")
+
+                progress_bar.empty()
+                content = b''.join(chunks)
                 uploaded_file = io.BytesIO(content)
 
-                # Detectar tipo de archivo por la URL o contenido
+                # Detectar tipo
                 url_lower = url_input.lower()
-                if url_lower.endswith('.xlsx') or url_lower.endswith('.xls'):
+                if url_lower.endswith('.csv.gz') or url_lower.endswith('.gz'):
+                    file_type = 'csv_gz'
+                elif url_lower.endswith('.xlsx') or url_lower.endswith('.xls'):
                     file_type = 'xlsx'
-                elif url_lower.endswith('.csv'):
-                    file_type = 'csv'
+                elif content[:4] == b'PK\x03\x04':
+                    file_type = 'xlsx'
+                elif content[:2] == b'\x1f\x8b':  # Firma gzip
+                    file_type = 'csv_gz'
                 else:
-                    # Intentar detectar por el contenido
-                    if content[:4] == b'PK\x03\x04':  # Firma de archivo ZIP/XLSX
-                        file_type = 'xlsx'
-                    else:
-                        file_type = 'csv'
+                    file_type = 'csv'
 
-                st.sidebar.success(f"Archivo descargado ({len(content)/1024/1024:.1f} MB)")
+                st.sidebar.success(f"Archivo descargado ({total_size/1024/1024:.1f} MB) - Tipo: {file_type}")
 
         except requests.exceptions.RequestException as e:
             st.sidebar.error(f"Error al descargar: {e}")
-            st.sidebar.info("Verifica que el enlace sea público y accesible.")
+            st.sidebar.info("Verifica que el enlace sea público ('Cualquier persona con el enlace').")
             uploaded_file = None
 
 # --- Parámetros del modelo ---
@@ -94,7 +146,7 @@ top_n_productos = st.sidebar.slider("Top N Productos a Mostrar", min_value=5, ma
 
 if uploaded_file is not None:
     try:
-        with st.spinner("Procesando archivo... Esto puede tardar varios minutos."):
+        with st.spinner("Procesando archivo... Esto puede tardar varios minutos para archivos grandes."):
             # --- 1. ETL ---
             st.write("### 1. Limpieza y Transformación de Datos (ETL)")
             with st.expander("Ver detalles del proceso ETL"):
@@ -105,13 +157,10 @@ if uploaded_file is not None:
             if n_meses < 6:
                 st.error(f"Se encontraron solo {n_meses} mes(es) de datos. Se necesitan al menos 6 meses para generar pronósticos confiables.")
                 st.warning("Por favor, sube un archivo con más meses de datos históricos.")
-                st.info("El ETL y el análisis exploratorio se completaron correctamente. Puedes revisar los detalles arriba.")
 
-                # Mostrar EDA aunque no haya suficientes datos para modelado
                 st.write("### 2. Análisis Exploratorio de Datos (EDA)")
                 with st.expander("Ver detalles del Análisis Exploratorio"):
                     figs_eda, dfs_eda = run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n_productos, st)
-
                 st.stop()
 
             # --- 2. EDA ---
@@ -160,7 +209,22 @@ if uploaded_file is not None:
             st.code(traceback.format_exc())
 
 else:
-    st.info("Por favor, sube un archivo CSV o Excel, o carga uno desde una URL, para comenzar el análisis.")
-    st.write("**Formatos aceptados:** CSV (separado por punto y coma o coma), Excel (.xlsx, .xls)")
-    st.write("**Tamaño máximo:** 1 GB")
-    st.write("**Fuentes de URL compatibles:** Google Drive, Dropbox, OneDrive (enlace público)")
+    st.info("Por favor, sube un archivo o carga uno desde una URL para comenzar el análisis.")
+
+    with st.expander("Formatos y opciones de carga"):
+        st.write("""
+        **Formatos aceptados:**
+        - CSV (separado por punto y coma o coma)
+        - CSV comprimido (.csv.gz) - recomendado para archivos grandes
+        - Excel (.xlsx, .xls)
+
+        **Tamaño máximo:** 1 GB
+
+        **Carga desde URL (Google Drive, Dropbox, etc.):**
+        1. Sube tu archivo a Google Drive
+        2. Haz clic derecho > Compartir > "Cualquier persona con el enlace"
+        3. Copia el enlace y pégalo en la opción "Cargar desde URL"
+
+        **Recomendación para archivos grandes (>200 MB):**
+        Usa el archivo pre-limpiado comprimido (.csv.gz) para un procesamiento más rápido.
+        """)
