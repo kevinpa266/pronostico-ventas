@@ -9,6 +9,8 @@ warnings.filterwarnings('ignore')
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
     mask = y_true != 0
+    if mask.sum() == 0:
+        return 0.0
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
 
@@ -19,8 +21,27 @@ def run_modeling(df_mensual, horizonte, st_ref):
     # --- Preparar datos ---
     df = df_mensual[['ds', 'y']].copy().sort_values('ds').reset_index(drop=True)
 
-    # División train/test (últimos 12 meses como test)
-    n_test = min(12, len(df) // 3)
+    # Eliminar filas con NaN en y o ds
+    df = df.dropna(subset=['ds', 'y'])
+
+    # Reemplazar infinitos
+    df['y'] = df['y'].replace([np.inf, -np.inf], np.nan).fillna(0)
+
+    n_total = len(df)
+    st_ref.write(f"Total de meses disponibles: {n_total}")
+
+    if n_total < 6:
+        raise ValueError(f"Se necesitan al menos 6 meses de datos para el modelado. Solo hay {n_total}.")
+
+    # División train/test
+    # Si hay pocos datos, usar menos meses de test
+    if n_total >= 24:
+        n_test = 12
+    elif n_total >= 12:
+        n_test = max(3, n_total // 4)
+    else:
+        n_test = max(2, n_total // 3)
+
     train = df.iloc[:-n_test].copy()
     test = df.iloc[-n_test:].copy()
 
@@ -34,9 +55,10 @@ def run_modeling(df_mensual, horizonte, st_ref):
     st_ref.write("Entrenando Modelo 1: Baseline (Seasonal Naive)...")
     try:
         baseline_preds = []
+        season_len = min(12, len(train))
         for i in range(len(test)):
-            idx = len(train) - 12 + (i % 12)
-            if idx >= 0 and idx < len(train):
+            idx = len(train) - season_len + (i % season_len)
+            if 0 <= idx < len(train):
                 baseline_preds.append(train['y'].iloc[idx])
             else:
                 baseline_preds.append(train['y'].mean())
@@ -81,13 +103,17 @@ def run_modeling(df_mensual, horizonte, st_ref):
             ])
         })
 
+        # Ajustar estacionalidad según cantidad de datos
+        yearly_season = n_total >= 18
+        seasonality_mode = 'multiplicative' if n_total >= 24 else 'additive'
+
         model_prophet = Prophet(
-            yearly_seasonality=True,
+            yearly_seasonality=yearly_season,
             weekly_seasonality=False,
             daily_seasonality=False,
             holidays=holidays_ec,
             changepoint_prior_scale=0.1,
-            seasonality_mode='multiplicative'
+            seasonality_mode=seasonality_mode
         )
         model_prophet.fit(train)
 
@@ -114,17 +140,21 @@ def run_modeling(df_mensual, horizonte, st_ref):
         from pmdarima import auto_arima
         from statsmodels.tsa.statespace.sarimax import SARIMAX
 
+        # Ajustar m según datos disponibles
+        m_seasonal = 12 if n_total >= 24 else max(2, n_total // 4)
+
         auto_model = auto_arima(
-            train['y'], m=12, seasonal=True, trace=False,
+            train['y'].values, m=m_seasonal, seasonal=True, trace=False,
             error_action='ignore', suppress_warnings=True, stepwise=True,
-            D=1
+            D=1 if n_total >= 24 else 0,
+            max_p=3, max_q=3, max_P=2, max_Q=2
         )
         best_order = auto_model.order
         best_seasonal_order = auto_model.seasonal_order
 
         st_ref.write(f"Mejores parámetros: SARIMA{best_order}{best_seasonal_order}")
 
-        model_sarima = SARIMAX(train['y'], order=best_order, seasonal_order=best_seasonal_order)
+        model_sarima = SARIMAX(train['y'].values, order=best_order, seasonal_order=best_seasonal_order)
         results_sarima_fit = model_sarima.fit(disp=False)
         forecast_sarima = results_sarima_fit.get_forecast(steps=n_test)
 
@@ -144,12 +174,25 @@ def run_modeling(df_mensual, horizonte, st_ref):
     # =============================================
     # COMPARACIÓN DE MODELOS
     # =============================================
+    if len(results) == 0:
+        raise ValueError("Ningún modelo pudo entrenarse correctamente. Verifica los datos.")
+
     st_ref.write("Comparando modelos...")
     comparison = []
     for name, res in results.items():
-        mae = mean_absolute_error(res['y_true'], res['y_pred'])
-        rmse = np.sqrt(mean_squared_error(res['y_true'], res['y_pred']))
-        mape = mean_absolute_percentage_error(res['y_true'], res['y_pred'])
+        y_true = np.array(res['y_true']).astype(float)
+        y_pred = np.array(res['y_pred']).astype(float)
+
+        # Limpiar NaN e Inf
+        mask = np.isfinite(y_true) & np.isfinite(y_pred)
+        if mask.sum() == 0:
+            continue
+        y_true_clean = y_true[mask]
+        y_pred_clean = y_pred[mask]
+
+        mae = mean_absolute_error(y_true_clean, y_pred_clean)
+        rmse = np.sqrt(mean_squared_error(y_true_clean, y_pred_clean))
+        mape = mean_absolute_percentage_error(y_true_clean, y_pred_clean)
         comparison.append({
             'Modelo': name,
             'MAE': mae,
@@ -184,7 +227,7 @@ def run_modeling(df_mensual, horizonte, st_ref):
     if best_model_name == 'SARIMA':
         order = results['SARIMA']['order']
         seasonal_order = results['SARIMA']['seasonal_order']
-        model_final = SARIMAX(df['y'], order=order, seasonal_order=seasonal_order)
+        model_final = SARIMAX(df['y'].values, order=order, seasonal_order=seasonal_order)
         fit_final = model_final.fit(disp=False)
         forecast_final = fit_final.get_forecast(steps=horizonte)
 
@@ -199,9 +242,9 @@ def run_modeling(df_mensual, horizonte, st_ref):
 
     elif best_model_name == 'Prophet':
         model_final_p = Prophet(
-            yearly_seasonality=True, weekly_seasonality=False,
+            yearly_seasonality=yearly_season, weekly_seasonality=False,
             daily_seasonality=False, holidays=holidays_ec,
-            changepoint_prior_scale=0.1, seasonality_mode='multiplicative'
+            changepoint_prior_scale=0.1, seasonality_mode=seasonality_mode
         )
         model_final_p.fit(df)
         future_final = model_final_p.make_future_dataframe(periods=horizonte, freq='MS')
@@ -218,10 +261,11 @@ def run_modeling(df_mensual, horizonte, st_ref):
     else:  # Baseline
         future_dates = pd.date_range(start=df['ds'].iloc[-1] + pd.DateOffset(months=1),
                                      periods=horizonte, freq='MS')
+        season_len = min(12, len(df))
         preds = []
         for i in range(horizonte):
-            idx = len(df) - 12 + (i % 12)
-            if idx >= 0:
+            idx = len(df) - season_len + (i % season_len)
+            if 0 <= idx < len(df):
                 preds.append(df['y'].iloc[idx])
             else:
                 preds.append(df['y'].mean())
@@ -232,6 +276,9 @@ def run_modeling(df_mensual, horizonte, st_ref):
             'yhat_lower': [np.nan] * horizonte,
             'yhat_upper': [np.nan] * horizonte
         })
+
+    # Limpiar NaN en pronóstico
+    df_pronostico['yhat'] = df_pronostico['yhat'].fillna(df['y'].mean())
 
     # --- Gráfico de pronóstico vs histórico ---
     fig_pronostico = go.Figure()

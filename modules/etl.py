@@ -42,24 +42,39 @@ COLUMN_HEADERS = [
 ]
 
 
+def _detect_and_load_excel(uploaded_file):
+    """Carga un archivo Excel detectando automáticamente si tiene encabezados."""
+    # Primero intentar leer con encabezados
+    df_with_header = pd.read_excel(uploaded_file, header=0)
+    cols_upper = [str(c).upper().strip() for c in df_with_header.columns]
+
+    # Verificar si los encabezados coinciden con los esperados
+    known_cols = {'DOC_ID', 'DOC_NUM', 'DOC_FECHA', 'FECHA_NEGOCIO', 'D_VALOR', 'D_ITEM'}
+    if known_cols.intersection(set(cols_upper)):
+        # El archivo tiene encabezados válidos
+        df_with_header.columns = cols_upper
+        # Renombrar columnas que coincidan
+        col_map = {c: c for c in cols_upper if c in COLUMN_HEADERS}
+        return df_with_header
+    else:
+        # No tiene encabezados, leer sin header y asignar nombres
+        uploaded_file.seek(0) if hasattr(uploaded_file, 'seek') else None
+        df = pd.read_excel(uploaded_file, header=None)
+        if df.shape[1] == len(COLUMN_HEADERS):
+            df.columns = COLUMN_HEADERS
+        elif df.shape[1] < len(COLUMN_HEADERS):
+            df.columns = COLUMN_HEADERS[:df.shape[1]]
+        else:
+            df.columns = COLUMN_HEADERS + [f'extra_{i}' for i in range(df.shape[1] - len(COLUMN_HEADERS))]
+        return df
+
+
 def run_etl(uploaded_file, st_ref, file_type='csv'):
     """Ejecuta el pipeline ETL completo. Acepta CSV o Excel."""
     st_ref.write("Cargando archivo...")
 
     if file_type == 'xlsx':
-        # --- Cargar Excel ---
-        df = pd.read_excel(uploaded_file, header=None)
-        # Detectar si la primera fila son encabezados
-        first_row = df.iloc[0].astype(str).tolist()
-        if 'DOC_ID' in first_row or 'doc_id' in [x.lower() for x in first_row]:
-            # El Excel tiene encabezados, descartarlos y usar los nuestros
-            df = df.iloc[1:].reset_index(drop=True)
-        if df.shape[1] == len(COLUMN_HEADERS):
-            df.columns = COLUMN_HEADERS
-        else:
-            st_ref.warning(f"El archivo tiene {df.shape[1]} columnas, se esperaban {len(COLUMN_HEADERS)}.")
-            # Asignar nombres a las columnas disponibles
-            df.columns = COLUMN_HEADERS[:df.shape[1]]
+        df = _detect_and_load_excel(uploaded_file)
     else:
         # --- Cargar CSV ---
         # Intentar con punto y coma primero (formato del ERP)
@@ -122,18 +137,29 @@ def run_etl(uploaded_file, st_ref, file_type='csv'):
                     'DOC_MONTO_IVA', 'DOC_PROPINA']
     for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+    # Filtrar valores negativos y ceros en D_VALOR (ventas válidas)
+    if 'D_VALOR' in df.columns:
+        filas_antes = len(df)
+        df = df[df['D_VALOR'] > 0]
+        eliminadas = filas_antes - len(df)
+        if eliminadas > 0:
+            st_ref.write(f"  Registros con valor <= 0 eliminados: {eliminadas:,}")
 
     # Crear columnas temporales
     df['anio'] = df['FECHA_NEGOCIO'].dt.year
     df['mes'] = df['FECHA_NEGOCIO'].dt.month
     df['dia'] = df['FECHA_NEGOCIO'].dt.day
-    df['hora'] = df['DOC_FECHA'].dt.hour
+    df['hora'] = df['DOC_FECHA'].dt.hour.fillna(0).astype(int)
     df['dia_semana'] = df['FECHA_NEGOCIO'].dt.dayofweek
     df['periodo'] = df['FECHA_NEGOCIO'].dt.to_period('M')
 
     filas_limpias = df.shape[0]
     st_ref.write(f"Datos limpios: {filas_limpias:,} filas")
+
+    if filas_limpias == 0:
+        raise ValueError("No quedaron registros después de la limpieza. Verifica el archivo de datos.")
 
     # --- Agregaciones ---
     st_ref.write("Generando tablas agregadas...")
@@ -144,6 +170,9 @@ def run_etl(uploaded_file, st_ref, file_type='csv'):
     ).reset_index()
     df_mensual.columns = ['ds', 'y']
     df_mensual['ds'] = df_mensual['ds'].dt.to_timestamp()
+
+    # Eliminar meses con ventas = 0 o NaN
+    df_mensual = df_mensual[df_mensual['y'] > 0].reset_index(drop=True)
 
     # Agregado diario
     df_diario = df.groupby(df['FECHA_NEGOCIO'].dt.date).agg(
@@ -165,6 +194,7 @@ def run_etl(uploaded_file, st_ref, file_type='csv'):
     ).reset_index()
 
     rango = f"{df['FECHA_NEGOCIO'].min().strftime('%Y-%m-%d')} a {df['FECHA_NEGOCIO'].max().strftime('%Y-%m-%d')}"
-    st_ref.success(f"ETL completado. Rango de datos: {rango}. Total registros limpios: {filas_limpias:,}")
+    n_meses = len(df_mensual)
+    st_ref.success(f"ETL completado. Rango: {rango}. Registros limpios: {filas_limpias:,}. Meses: {n_meses}")
 
     return df, df_mensual, df_diario, df_producto, df_familia
