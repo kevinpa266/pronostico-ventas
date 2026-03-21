@@ -283,7 +283,7 @@ if uploaded_file is not None and len(modelos_seleccionados) >= 1:
                 st.success(f"El pronóstico supera la meta mensual en un {cumplimiento - 100:.1f}%.")
 
             # Gráfico principal de pronóstico
-            st.plotly_chart(figs_modelos['pronostico_vs_historico'], use_container_width=True)
+            st.plotly_chart(figs_modelos['pronostico_vs_historico'], use_container_width=True, key='chart_pronostico_historico')
 
             # Tabla comparativa de modelos
             st.subheader("Comparación de Modelos")
@@ -310,12 +310,12 @@ if uploaded_file is not None and len(modelos_seleccionados) >= 1:
             # Gráficos de análisis
             st.subheader("Análisis de Productos y Patrones")
             c1, c2 = st.columns(2)
-            c1.plotly_chart(figs_eda['top_productos'], use_container_width=True)
-            c2.plotly_chart(figs_eda['patron_horario'], use_container_width=True)
+            c1.plotly_chart(figs_eda['top_productos'], use_container_width=True, key='chart_top_productos')
+            c2.plotly_chart(figs_eda['patron_horario'], use_container_width=True, key='chart_patron_horario')
 
             # Gráfico de comparación de modelos si existe
             if 'comparacion_modelos' in figs_modelos:
-                st.plotly_chart(figs_modelos['comparacion_modelos'], use_container_width=True)
+                st.plotly_chart(figs_modelos['comparacion_modelos'], use_container_width=True, key='chart_comparacion_modelos')
 
             # --- 5. Generación de Reporte ---
             st.write("### 4. Generación de Reporte PDF")
