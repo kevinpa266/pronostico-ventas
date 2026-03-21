@@ -288,23 +288,27 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             st_ref.code(traceback.format_exc())
 
     # =============================================
-    # MODELO 5: LSTM
+    # MODELO 5: LSTM (PyTorch)
     # =============================================
     if 'lstm' in modelos_keys:
-        st_ref.write("Entrenando Modelo 5: **LSTM** (Deep Learning)... Esto puede tardar unos minutos.")
+        st_ref.write("Entrenando Modelo 5: **LSTM** (Deep Learning con PyTorch)... Esto puede tardar unos minutos.")
         try:
+            import torch
+            import torch.nn as nn
             from sklearn.preprocessing import MinMaxScaler
-            import os
-            os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
-            try:
-                from tensorflow.keras.models import Sequential
-                from tensorflow.keras.layers import LSTM as LSTM_Layer, Dense, Dropout
-                from tensorflow.keras.callbacks import EarlyStopping
-            except ImportError:
-                from keras.models import Sequential
-                from keras.layers import LSTM as LSTM_Layer, Dense, Dropout
-                from keras.callbacks import EarlyStopping
+            # Definir modelo LSTM en PyTorch
+            class LSTMModel(nn.Module):
+                def __init__(self, input_size=1, hidden_size=50, num_layers=2, dropout=0.2):
+                    super(LSTMModel, self).__init__()
+                    self.lstm = nn.LSTM(input_size, hidden_size, num_layers,
+                                       batch_first=True, dropout=dropout)
+                    self.fc = nn.Linear(hidden_size, 1)
+
+                def forward(self, x):
+                    lstm_out, _ = self.lstm(x)
+                    out = self.fc(lstm_out[:, -1, :])
+                    return out
 
             # Normalizar datos
             scaler = MinMaxScaler(feature_range=(0, 1))
@@ -317,31 +321,52 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             if len(X_all) < n_test + 2:
                 raise ValueError(f"No hay suficientes datos para LSTM con secuencia de {seq_length}")
 
-            X_train_lstm = X_all[:-n_test].reshape(-1, seq_length, 1)
+            X_train_lstm = X_all[:-n_test]
             y_train_lstm = y_all[:-n_test]
-            X_test_lstm = X_all[-n_test:].reshape(-1, seq_length, 1)
+            X_test_lstm = X_all[-n_test:]
             y_test_lstm = y_all[-n_test:]
 
-            # Construir modelo LSTM
-            model_lstm = Sequential([
-                LSTM_Layer(50, activation='relu', input_shape=(seq_length, 1), return_sequences=True),
-                Dropout(0.2),
-                LSTM_Layer(30, activation='relu'),
-                Dropout(0.2),
-                Dense(1)
-            ])
-            model_lstm.compile(optimizer='adam', loss='mse')
+            # Convertir a tensores PyTorch
+            X_train_t = torch.FloatTensor(X_train_lstm).unsqueeze(-1)
+            y_train_t = torch.FloatTensor(y_train_lstm).unsqueeze(-1)
+            X_test_t = torch.FloatTensor(X_test_lstm).unsqueeze(-1)
 
-            early_stop = EarlyStopping(monitor='loss', patience=10, restore_best_weights=True)
+            # Crear y entrenar modelo
+            model_lstm = LSTMModel(input_size=1, hidden_size=50, num_layers=2, dropout=0.2)
+            criterion = nn.MSELoss()
+            optimizer = torch.optim.Adam(model_lstm.parameters(), lr=0.01)
 
-            model_lstm.fit(
-                X_train_lstm, y_train_lstm,
-                epochs=100, batch_size=4, verbose=0,
-                callbacks=[early_stop]
-            )
+            # Entrenamiento
+            model_lstm.train()
+            best_loss = float('inf')
+            patience_counter = 0
+            best_state = None
+
+            for epoch in range(100):
+                optimizer.zero_grad()
+                outputs = model_lstm(X_train_t)
+                loss = criterion(outputs, y_train_t)
+                loss.backward()
+                optimizer.step()
+
+                # Early stopping
+                if loss.item() < best_loss:
+                    best_loss = loss.item()
+                    patience_counter = 0
+                    best_state = model_lstm.state_dict().copy()
+                else:
+                    patience_counter += 1
+                    if patience_counter >= 10:
+                        break
+
+            if best_state is not None:
+                model_lstm.load_state_dict(best_state)
 
             # Predecir test
-            lstm_preds_scaled = model_lstm.predict(X_test_lstm, verbose=0).flatten()
+            model_lstm.eval()
+            with torch.no_grad():
+                lstm_preds_scaled = model_lstm(X_test_t).numpy().flatten()
+
             lstm_preds = scaler.inverse_transform(lstm_preds_scaled.reshape(-1, 1)).flatten()
             y_test_real = scaler.inverse_transform(y_test_lstm.reshape(-1, 1)).flatten()
 
@@ -356,8 +381,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             }
             st_ref.write("LSTM completado.")
         except ImportError:
-            st_ref.warning("TensorFlow/Keras no está instalado. El modelo LSTM no se pudo entrenar. "
-                          "Instala con: pip install tensorflow")
+            st_ref.warning("PyTorch no está instalado. El modelo LSTM no se pudo entrenar.")
         except Exception as e:
             st_ref.warning(f"Error en LSTM: {e}")
             import traceback
@@ -541,6 +565,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
         })
 
     elif best_model_name == 'LSTM':
+        import torch
         scaler = results['LSTM']['scaler']
         seq_length = results['LSTM']['seq_length']
         model_lstm_final = results['LSTM']['model']
@@ -548,10 +573,12 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
         y_scaled_full = scaler.transform(df['y'].values.reshape(-1, 1)).flatten()
         current_seq = y_scaled_full[-seq_length:].tolist()
 
+        model_lstm_final.eval()
         preds_lstm = []
         for step in range(horizonte):
-            X_input = np.array(current_seq[-seq_length:]).reshape(1, seq_length, 1)
-            pred_scaled = model_lstm_final.predict(X_input, verbose=0).flatten()[0]
+            X_input = torch.FloatTensor(np.array(current_seq[-seq_length:])).unsqueeze(0).unsqueeze(-1)
+            with torch.no_grad():
+                pred_scaled = model_lstm_final(X_input).numpy().flatten()[0]
             pred_real = scaler.inverse_transform([[pred_scaled]])[0][0]
             preds_lstm.append(max(0, pred_real))
             current_seq.append(pred_scaled)
