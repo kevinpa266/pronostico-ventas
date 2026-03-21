@@ -40,12 +40,7 @@ else:
 
 # --- Carga de archivo ---
 st.sidebar.subheader("2. Cargar Datos")
-
-metodo_carga = st.sidebar.radio(
-    "Método de carga:",
-    ["Subir archivo", "Cargar desde URL"],
-    help="Sube un archivo directamente (hasta 1 GB) o pega un enlace de Google Drive, Dropbox u otra URL."
-)
+st.sidebar.caption("Elige una de las dos opciones para cargar tus datos:")
 
 uploaded_file = None
 file_type = 'csv'
@@ -89,24 +84,43 @@ def _download_gdrive_large(file_id):
     return response
 
 
-if metodo_carga == "Subir archivo":
-    uploaded_file = st.sidebar.file_uploader(
-        "Sube tu archivo de ventas",
+# --- Opción A: Subir archivo ---
+with st.sidebar.expander("📁 Opción A: Subir archivo", expanded=True):
+    st.caption("Arrastra o selecciona un archivo desde tu computadora (hasta 1 GB)")
+    uploaded_file_local = st.file_uploader(
+        "Archivo de ventas",
         type=["csv", "xlsx", "xls", "gz"],
-        help="Formatos: CSV, Excel, CSV comprimido (.csv.gz). Máximo 1 GB."
+        help="Formatos aceptados: CSV, Excel (.xlsx, .xls), CSV comprimido (.csv.gz). Máximo 1 GB.",
+        label_visibility="collapsed"
     )
-    if uploaded_file is not None:
-        file_type = _detect_file_type(uploaded_file.name)
+    if uploaded_file_local is not None:
+        uploaded_file = uploaded_file_local
+        file_type = _detect_file_type(uploaded_file_local.name)
+        st.success(f"Archivo cargado: {uploaded_file_local.name}")
 
-else:
-    url_input = st.sidebar.text_input(
-        "Pega la URL del archivo",
+# --- Opción B: Cargar desde URL ---
+with st.sidebar.expander("🌐 Opción B: Cargar desde URL / Nube", expanded=not bool(uploaded_file)):
+    st.caption("Pega un enlace público de Google Drive, Dropbox u OneDrive")
+    url_input = st.text_input(
+        "URL del archivo",
         placeholder="https://drive.google.com/file/d/.../view",
-        help="Compatible con Google Drive, Dropbox, OneDrive (enlace público)"
+        help="El enlace debe ser público ('Cualquier persona con el enlace'). "
+             "Compatible con Google Drive, Dropbox y enlaces directos.",
+        label_visibility="collapsed"
     )
-    if url_input:
+
+    # Instrucciones para Google Drive
+    with st.popover("¿Cómo obtener el enlace de Google Drive?"):
+        st.markdown("""
+        1. Haz clic derecho en el archivo en Google Drive
+        2. Selecciona **Compartir**
+        3. Cambia a **Cualquier persona con el enlace**
+        4. Copia el enlace y pégalo aquí
+        """)
+
+    if url_input and uploaded_file is None:
         try:
-            with st.spinner("Descargando archivo desde URL... Esto puede tardar unos minutos para archivos grandes."):
+            with st.spinner("Descargando archivo... Esto puede tardar unos minutos."):
                 # Google Drive
                 gdrive_match = re.search(r'drive\.google\.com/file/d/([a-zA-Z0-9_-]+)', url_input)
                 if gdrive_match:
@@ -124,7 +138,7 @@ else:
                 # Descargar por chunks para archivos grandes
                 chunks = []
                 total_size = 0
-                progress_bar = st.sidebar.progress(0, text="Descargando...")
+                progress_bar = st.progress(0, text="Descargando...")
                 content_length = int(response.headers.get('content-length', 0))
 
                 for chunk in response.iter_content(chunk_size=1024 * 1024):  # 1MB chunks
@@ -152,11 +166,11 @@ else:
                 else:
                     file_type = 'csv'
 
-                st.sidebar.success(f"Archivo descargado ({total_size/1024/1024:.1f} MB) - Tipo: {file_type}")
+                st.success(f"Descargado: {total_size/1024/1024:.1f} MB ({file_type.upper()})")
 
         except requests.exceptions.RequestException as e:
-            st.sidebar.error(f"Error al descargar: {e}")
-            st.sidebar.info("Verifica que el enlace sea público ('Cualquier persona con el enlace').")
+            st.error(f"Error al descargar: {e}")
+            st.info("Verifica que el enlace sea público.")
             uploaded_file = None
 
 # --- Parámetros del modelo ---
@@ -186,6 +200,24 @@ if len(modelos_seleccionados) < 1:
     st.sidebar.warning("Selecciona al menos 1 modelo.")
 
 modelos_keys = [modelos_disponibles[m] for m in modelos_seleccionados]
+
+# --- Guía de uso ---
+with st.expander("Guía de uso del sistema"):
+    st.markdown("""
+    **¿Cómo usar esta aplicación?**
+
+    1. **Selecciona el tipo de uso** en la barra lateral (primera carga o actualización mensual)
+    2. **Carga tus datos** usando una de las dos opciones:
+       - **Opción A:** Sube un archivo directamente desde tu computadora (CSV, Excel o CSV comprimido)
+       - **Opción B:** Pega un enlace de Google Drive, Dropbox u OneDrive con el archivo
+    3. **Configura los parámetros** (meta de ventas, horizonte de pronóstico, modelos)
+    4. **Espera el procesamiento** — el sistema limpiará los datos, analizará patrones y generará pronósticos
+    5. **Descarga el reporte PDF** para presentar en la reunión gerencial
+
+    **Formatos aceptados:** CSV (separado por `;`), Excel (.xlsx, .xls), CSV comprimido (.csv.gz)
+
+    **Tamaño máximo:** 1 GB. Para archivos muy grandes, se recomienda usar el archivo pre-limpiado comprimido (.csv.gz).
+    """)
 
 if uploaded_file is not None and len(modelos_seleccionados) >= 1:
     try:
@@ -327,38 +359,3 @@ else:
         st.warning("Selecciona al menos 1 modelo predictivo en la barra lateral.")
     else:
         st.info("Por favor, sube un archivo o carga uno desde una URL para comenzar el análisis.")
-
-    with st.expander("Guía de uso del sistema"):
-        st.write("""
-        **¿Cómo funciona este sistema?**
-
-        Este sistema analiza el historial de ventas de tu empresa para generar pronósticos mensuales
-        y recomendaciones accionables para la gerencia.
-
-        **Flujo de trabajo:**
-
-        1. **Primera carga:** Sube el archivo completo del ERP con todo el historial (idealmente 2-3 años).
-           El sistema limpiará los datos, analizará patrones y generará pronósticos.
-
-        2. **Actualización mensual:** Cada mes, exporta los datos actualizados del ERP (incluyendo el mes nuevo)
-           y súbelos al sistema. Los pronósticos se actualizarán automáticamente.
-
-        **Formatos aceptados:**
-        - CSV (separado por punto y coma o coma)
-        - CSV comprimido (.csv.gz) - recomendado para archivos grandes
-        - Excel (.xlsx, .xls)
-
-        **Tamaño máximo:** 1 GB
-
-        **Carga desde URL (Google Drive, Dropbox, etc.):**
-        1. Sube tu archivo a Google Drive
-        2. Haz clic derecho > Compartir > "Cualquier persona con el enlace"
-        3. Copia el enlace y pégalo en la opción "Cargar desde URL"
-
-        **Modelos disponibles:**
-        - **Baseline:** Repite el patrón del año anterior (referencia)
-        - **Prophet:** Modelo de Meta que descompone tendencia y estacionalidad
-        - **SARIMA:** Modelo estadístico clásico para series temporales
-        - **XGBoost:** Machine Learning que aprende de múltiples características
-        - **LSTM:** Red neuronal con memoria para patrones complejos
-        """)
