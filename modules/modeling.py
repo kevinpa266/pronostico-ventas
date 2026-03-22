@@ -464,7 +464,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
         template='plotly_white', height=500
     )
     figs['comparacion_modelos'] = fig_comp
-    st_ref.plotly_chart(fig_comp, width='stretch')
+    st_ref.plotly_chart(fig_comp, use_container_width=True)
 
     # Gráfico de barras de métricas
     fig_metricas = make_subplots(rows=1, cols=3, subplot_titles=['MAE ($)', 'RMSE ($)', 'MAPE (%)'])
@@ -639,7 +639,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
     )
     figs['pronostico_vs_historico'] = fig_pronostico
 
-    st_ref.plotly_chart(fig_pronostico, width='stretch')
+    st_ref.plotly_chart(fig_pronostico, use_container_width=True)
     st_ref.success(f"Pronóstico final generado exitosamente con **{best_model_name}**.")
 
     return df_comparacion, df_pronostico, best_model_name, figs
