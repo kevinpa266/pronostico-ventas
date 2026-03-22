@@ -60,26 +60,27 @@ def _detect_file_type(name):
 def _download_gdrive_large(file_id):
     """Descarga archivos grandes de Google Drive manejando la confirmación de virus scan."""
     session = requests.Session()
-    base_url = "https://drive.google.com/uc?export=download"
 
-    # Primera solicitud
-    response = session.get(base_url, params={'id': file_id}, stream=True, timeout=30)
+    # Usar la URL moderna de Google Drive (drive.usercontent.google.com)
+    # que permite descargar archivos grandes directamente con confirm=t
+    url = f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t"
+    response = session.get(url, stream=True, timeout=300)
 
-    # Buscar token de confirmación para archivos grandes
-    confirm_token = None
-    for key, value in response.cookies.items():
-        if key.startswith('download_warning'):
-            confirm_token = value
-            break
+    # Fallback al método antiguo si falla
+    if response.status_code != 200 or response.headers.get('Content-Type', '').startswith('text/html'):
+        base_url = "https://drive.google.com/uc?export=download"
+        response = session.get(base_url, params={'id': file_id}, stream=True, timeout=300)
 
-    if confirm_token:
-        response = session.get(base_url, params={'id': file_id, 'confirm': confirm_token},
-                               stream=True, timeout=30)
+        # Buscar token de confirmación para archivos grandes
+        confirm_token = None
+        for key, value in response.cookies.items():
+            if key.startswith('download_warning'):
+                confirm_token = value
+                break
 
-    # Si no hay token en cookies, intentar con confirm=t
-    if response.headers.get('Content-Type', '').startswith('text/html'):
-        response = session.get(base_url, params={'id': file_id, 'confirm': 't'},
-                               stream=True, timeout=30)
+        if confirm_token:
+            response = session.get(base_url, params={'id': file_id, 'confirm': confirm_token},
+                                   stream=True, timeout=300)
 
     return response
 
