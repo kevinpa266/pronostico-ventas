@@ -283,7 +283,7 @@ if uploaded_file is not None and len(modelos_seleccionados) >= 1:
                 st.success(f"El pronóstico supera la meta mensual en un {cumplimiento - 100:.1f}%.")
 
             # Gráfico principal de pronóstico
-            st.plotly_chart(figs_modelos['pronostico_vs_historico'], use_container_width=True, key='chart_pronostico_historico')
+            st.plotly_chart(figs_modelos['pronostico_vs_historico'], width='stretch', key='chart_pronostico_historico')
 
             # Tabla comparativa de modelos
             st.subheader("Comparación de Modelos")
@@ -291,7 +291,7 @@ if uploaded_file is not None and len(modelos_seleccionados) >= 1:
                 'MAE': '${:,.2f}',
                 'RMSE': '${:,.2f}',
                 'MAPE': '{:.2f}%'
-            }).highlight_min(subset=['MAE', 'RMSE', 'MAPE'], color='#d4edda'), use_container_width=True)
+            }).highlight_min(subset=['MAE', 'RMSE', 'MAPE'], color='#d4edda'), width='stretch')
 
             # Tabla de pronóstico
             st.subheader("Pronóstico Detallado")
@@ -305,17 +305,17 @@ if uploaded_file is not None and len(modelos_seleccionados) >= 1:
                 'Pronóstico ($)': '${:,.2f}',
                 'Límite Inferior ($)': '${:,.2f}',
                 'Límite Superior ($)': '${:,.2f}'
-            }), use_container_width=True)
+            }), width='stretch')
 
             # Gráficos de análisis
             st.subheader("Análisis de Productos y Patrones")
             c1, c2 = st.columns(2)
-            c1.plotly_chart(figs_eda['top_productos'], use_container_width=True, key='chart_top_productos')
-            c2.plotly_chart(figs_eda['patron_horario'], use_container_width=True, key='chart_patron_horario')
+            c1.plotly_chart(figs_eda['top_productos'], width='stretch', key='chart_top_productos')
+            c2.plotly_chart(figs_eda['patron_horario'], width='stretch', key='chart_patron_horario')
 
             # Gráfico de comparación de modelos si existe
             if 'comparacion_modelos' in figs_modelos:
-                st.plotly_chart(figs_modelos['comparacion_modelos'], use_container_width=True, key='chart_comparacion_modelos')
+                st.plotly_chart(figs_modelos['comparacion_modelos'], width='stretch', key='chart_comparacion_modelos')
 
             # --- 5. Generación de Reporte ---
             st.write("### 4. Generación de Reporte PDF")

@@ -31,7 +31,7 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
         template='plotly_white', height=400
     )
     figs['tendencia_mensual'] = fig_tendencia
-    st_ref.plotly_chart(fig_tendencia, use_container_width=True)
+    st_ref.plotly_chart(fig_tendencia, width='stretch')
 
     # --- 2. Estacionalidad mensual ---
     df_estacional = df_limpios.groupby('mes')['D_VALOR'].mean().reset_index()
@@ -49,7 +49,7 @@ def run_eda(df_limpios, df_mensual, df_diario, df_producto, df_familia, top_n, s
     )
     fig_estacional.update_layout(height=400)
     figs['estacionalidad'] = fig_estacional
-    st_ref.plotly_chart(fig_estacional, use_container_width=True)
+    st_ref.plotly_chart(fig_estacional, width='stretch')
 
     # --- 3. Patrón horario ---
     df_horario = df_limpios.groupby('hora')['D_VALOR'].sum().reset_index()
