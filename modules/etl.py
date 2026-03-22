@@ -119,7 +119,7 @@ def _load_csv_chunked(file_source, st_ref, compression=None):
         # Formato desconocido - intentar auto-detectar
         st_ref.write("Detectando formato del archivo...")
         reader = pd.read_csv(file_source, sep=None, engine='python', header='infer',
-                             chunksize=chunk_size, low_memory=False, compression=compression)
+                             chunksize=chunk_size, compression=compression)
 
     for i, chunk in enumerate(reader):
         total_raw += len(chunk)
