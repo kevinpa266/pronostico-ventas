@@ -360,6 +360,87 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.ln()
     pdf.ln(5)
 
+    # --- Interpretación de Métricas ---
+    mejor_modelo = df_comparacion.loc[df_comparacion['MAE'].idxmin()]
+    mejor_nombre = mejor_modelo['Modelo']
+    mejor_mae = mejor_modelo['MAE']
+    mejor_rmse = mejor_modelo['RMSE']
+    mejor_mape = mejor_modelo['MAPE']
+
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_text_color(46, 134, 171)
+    pdf.cell(0, 8, f'Modelo Seleccionado: {mejor_nombre}', new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(51, 51, 51)
+
+    # Interpretación del MAE
+    pdf.multi_cell(0, 5,
+        f'MAE (Error Absoluto Medio): ${mejor_mae:,.2f}. Esto significa que, en promedio, '
+        f'el modelo se equivoca en ${mejor_mae:,.2f} por mes respecto al valor real de ventas. '
+        f'Es decir, si el pronostico indica $500,000, las ventas reales podrian estar entre '
+        f'${500000 - mejor_mae:,.2f} y ${500000 + mejor_mae:,.2f} aproximadamente.')
+    pdf.ln(2)
+
+    # Interpretación del MAPE
+    if mejor_mape <= 10:
+        calidad_mape = 'alta precision (excelente)'
+    elif mejor_mape <= 20:
+        calidad_mape = 'buena precision (aceptable para planificacion)'
+    elif mejor_mape <= 30:
+        calidad_mape = 'precision moderada (usar con precaucion)'
+    else:
+        calidad_mape = 'precision baja (se recomienda revisar los datos o el modelo)'
+
+    pdf.multi_cell(0, 5,
+        f'MAPE (Error Porcentual Absoluto Medio): {mejor_mape:.2f}%. Esto indica que el modelo '
+        f'tiene un margen de error promedio del {mejor_mape:.2f}% en sus predicciones, lo cual '
+        f'se considera {calidad_mape}.')
+    pdf.ln(2)
+
+    # Interpretación del Cumplimiento
+    if cumplimiento < 70:
+        texto_cumpl = (
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
+            f'(${pronostico_prox:,.2f}) esta significativamente por debajo de la meta '
+            f'(${meta_ventas:,.2f}). Esto puede deberse a estacionalidad (meses de baja demanda '
+            f'como febrero o septiembre), reduccion en el flujo de pasajeros, o a que la meta '
+            f'necesita ajustarse segun el patron historico de ventas.')
+    elif cumplimiento < 90:
+        texto_cumpl = (
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
+            f'(${pronostico_prox:,.2f}) esta ligeramente por debajo de la meta '
+            f'(${meta_ventas:,.2f}). Se recomienda implementar estrategias de impulso como '
+            f'promociones o combos para cerrar la brecha.')
+    elif cumplimiento <= 110:
+        texto_cumpl = (
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
+            f'(${pronostico_prox:,.2f}) esta alineado con la meta (${meta_ventas:,.2f}). '
+            f'Se recomienda mantener las estrategias actuales.')
+    else:
+        texto_cumpl = (
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
+            f'(${pronostico_prox:,.2f}) supera la meta (${meta_ventas:,.2f}). Esto es '
+            f'consistente con meses de alta temporada (como julio). Considerar ajustar la meta '
+            f'al alza o aprovechar el excedente para reforzar inventario.')
+
+    pdf.multi_cell(0, 5, texto_cumpl)
+    pdf.ln(2)
+
+    # Interpretación de los intervalos de confianza
+    if df_pronostico['yhat_lower'].notna().any():
+        rango_inf = df_pronostico['yhat_lower'].iloc[0]
+        rango_sup = df_pronostico['yhat_upper'].iloc[0]
+        pdf.multi_cell(0, 5,
+            f'Intervalo de Confianza (95%): Para el proximo mes, las ventas se estiman entre '
+            f'${rango_inf:,.2f} (limite inferior) y ${rango_sup:,.2f} (limite superior). '
+            f'Esto significa que existe un 95% de probabilidad de que las ventas reales '
+            f'se encuentren dentro de este rango.')
+        pdf.ln(2)
+
+    pdf.ln(3)
+
     # --- Tabla de Pronóstico ---
     pdf.set_font('Helvetica', 'B', 14)
     pdf.set_text_color(162, 59, 114)

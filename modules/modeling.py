@@ -6,6 +6,12 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 import warnings
 warnings.filterwarnings('ignore')
 
+# =============================================
+# SEMILLAS FIJAS PARA REPRODUCIBILIDAD
+# =============================================
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
+
 
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
@@ -13,6 +19,18 @@ def mean_absolute_percentage_error(y_true, y_pred):
     if mask.sum() == 0:
         return 0.0
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
+
+
+def _calculate_confidence_intervals(y_true, y_pred, forecast_values):
+    """Calcula intervalos de confianza al 95% basados en el RMSE del período de prueba."""
+    residuals = np.array(y_true) - np.array(y_pred)
+    rmse = np.sqrt(np.mean(residuals ** 2))
+    z_95 = 1.96  # Z-score para 95% de confianza
+    lower = np.array(forecast_values) - z_95 * rmse
+    upper = np.array(forecast_values) + z_95 * rmse
+    # No permitir valores negativos en el límite inferior
+    lower = np.clip(lower, 0, None)
+    return lower, upper
 
 
 def _create_xgboost_features(series, n_lags=12):
@@ -65,6 +83,9 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
     # Si no se especifican modelos, usar los 3 originales
     if modelos_keys is None:
         modelos_keys = ['baseline', 'prophet', 'sarima']
+
+    # Fijar semilla al inicio de cada ejecución para reproducibilidad
+    np.random.seed(RANDOM_SEED)
 
     figs = {}
 
@@ -194,7 +215,8 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
                 train['y'].values, m=m_seasonal, seasonal=True, trace=False,
                 error_action='ignore', suppress_warnings=True, stepwise=True,
                 D=1 if n_total >= 24 else 0,
-                max_p=3, max_q=3, max_P=2, max_Q=2
+                max_p=3, max_q=3, max_P=2, max_Q=2,
+                random_state=RANDOM_SEED
             )
             best_order = auto_model.order
             best_seasonal_order = auto_model.seasonal_order
@@ -252,7 +274,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
                 colsample_bytree=0.8,
                 reg_alpha=0.1,
                 reg_lambda=1.0,
-                random_state=42,
+                random_state=RANDOM_SEED,
                 verbosity=0
             )
             model_xgb.fit(X_train, y_train)
@@ -296,6 +318,14 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             import torch
             import torch.nn as nn
             from sklearn.preprocessing import MinMaxScaler
+
+            # Fijar semillas para reproducibilidad del LSTM
+            torch.manual_seed(RANDOM_SEED)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed(RANDOM_SEED)
+                torch.cuda.manual_seed_all(RANDOM_SEED)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
             # Definir modelo LSTM en PyTorch
             class LSTMModel(nn.Module):
@@ -415,7 +445,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             'MAE': mae,
             'RMSE': rmse,
             'MAPE': mape,
-            'Intervalos_Confianza': res['has_ci']
+            'Intervalos_Confianza': True  # Ahora todos tienen IC
         })
 
     df_comparacion = pd.DataFrame(comparison)
@@ -493,6 +523,9 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
     future_dates = pd.date_range(start=df['ds'].iloc[-1] + pd.DateOffset(months=1),
                                  periods=horizonte, freq='MS')
 
+    # Obtener y_true y y_pred del mejor modelo para calcular IC
+    best_res = results[best_model_name]
+
     if best_model_name == 'SARIMA':
         from statsmodels.tsa.statespace.sarimax import SARIMAX
         order = results['SARIMA']['order']
@@ -542,7 +575,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
         model_xgb_final = XGBRegressor(
             n_estimators=200, max_depth=4, learning_rate=0.1,
             subsample=0.8, colsample_bytree=0.8,
-            reg_alpha=0.1, reg_lambda=1.0, random_state=42, verbosity=0
+            reg_alpha=0.1, reg_lambda=1.0, random_state=RANDOM_SEED, verbosity=0
         )
         model_xgb_final.fit(X_full, y_full)
 
@@ -557,15 +590,23 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             preds_xgb.append(max(0, pred))
             y_extended.append(pred)
 
+        # Calcular intervalos de confianza basados en RMSE del test
+        ci_lower, ci_upper = _calculate_confidence_intervals(
+            best_res['y_true'], best_res['y_pred'], preds_xgb
+        )
+
         df_pronostico = pd.DataFrame({
             'ds': future_dates,
             'yhat': preds_xgb,
-            'yhat_lower': [np.nan] * horizonte,
-            'yhat_upper': [np.nan] * horizonte
+            'yhat_lower': ci_lower,
+            'yhat_upper': ci_upper
         })
 
     elif best_model_name == 'LSTM':
         import torch
+        # Fijar semilla de nuevo para reproducibilidad en pronóstico
+        torch.manual_seed(RANDOM_SEED)
+
         scaler = results['LSTM']['scaler']
         seq_length = results['LSTM']['seq_length']
         model_lstm_final = results['LSTM']['model']
@@ -583,11 +624,16 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             preds_lstm.append(max(0, pred_real))
             current_seq.append(pred_scaled)
 
+        # Calcular intervalos de confianza basados en RMSE del test
+        ci_lower, ci_upper = _calculate_confidence_intervals(
+            best_res['y_true'], best_res['y_pred'], preds_lstm
+        )
+
         df_pronostico = pd.DataFrame({
             'ds': future_dates,
             'yhat': preds_lstm,
-            'yhat_lower': [np.nan] * horizonte,
-            'yhat_upper': [np.nan] * horizonte
+            'yhat_lower': ci_lower,
+            'yhat_upper': ci_upper
         })
 
     else:  # Baseline
@@ -600,11 +646,16 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             else:
                 preds.append(df['y'].mean())
 
+        # Calcular intervalos de confianza basados en RMSE del test
+        ci_lower, ci_upper = _calculate_confidence_intervals(
+            best_res['y_true'], best_res['y_pred'], preds
+        )
+
         df_pronostico = pd.DataFrame({
             'ds': future_dates,
             'yhat': preds,
-            'yhat_lower': [np.nan] * horizonte,
-            'yhat_upper': [np.nan] * horizonte
+            'yhat_lower': ci_lower,
+            'yhat_upper': ci_upper
         })
 
     # Limpiar NaN en pronóstico
