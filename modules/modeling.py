@@ -456,11 +456,33 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
     }).highlight_min(subset=['MAE', 'RMSE', 'MAPE'], color='#d4edda'))
 
     # =============================================
-    # SELECCIÓN DEL MEJOR MODELO
+    # SELECCIÓN DEL MEJOR MODELO (con principio de parsimonia)
     # =============================================
-    best_model_name = df_comparacion.loc[df_comparacion['MAE'].idxmin(), 'Modelo']
-    best_mae = df_comparacion.loc[df_comparacion['MAE'].idxmin(), 'MAE']
-    best_mape = df_comparacion.loc[df_comparacion['MAE'].idxmin(), 'MAPE']
+    # Orden de preferencia por simplicidad/interpretabilidad
+    ORDEN_PARSIMONIA = ['Baseline', 'SARIMA', 'Prophet', 'XGBoost', 'LSTM']
+
+    best_mae_global = df_comparacion['MAE'].min()
+    umbral_parsimonia = 0.05  # 5% de tolerancia
+
+    # Filtrar modelos cuyo MAE esté dentro del 5% del mejor
+    candidatos = df_comparacion[
+        df_comparacion['MAE'] <= best_mae_global * (1 + umbral_parsimonia)
+    ].copy()
+
+    # Entre los candidatos, elegir el más simple según orden de parsimonia
+    best_model_name = None
+    for modelo in ORDEN_PARSIMONIA:
+        if modelo in candidatos['Modelo'].values:
+            best_model_name = modelo
+            break
+
+    # Fallback: si ninguno coincide, usar el de menor MAE
+    if best_model_name is None:
+        best_model_name = df_comparacion.loc[df_comparacion['MAE'].idxmin(), 'Modelo']
+
+    best_row = df_comparacion[df_comparacion['Modelo'] == best_model_name].iloc[0]
+    best_mae = best_row['MAE']
+    best_mape = best_row['MAPE']
 
     st_ref.success(
         f"Modelo seleccionado: **{best_model_name}** "

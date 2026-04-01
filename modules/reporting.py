@@ -124,16 +124,16 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
     if cumplimiento < alerta_cumplimiento:
         recomendaciones.append({
             'tipo': 'Alerta',
-            'titulo': 'Pronostico por Debajo de la Meta',
-            'texto': f'El pronostico del proximo mes (${pronostico_prox:,.2f}) representa solo el '
+            'titulo': 'Pronóstico por Debajo de la Meta',
+            'texto': f'El pronóstico del próximo mes (${pronostico_prox:,.2f}) representa solo el '
                      f'{cumplimiento:.1f}% de la meta (${meta_ventas:,.2f}). Se recomienda implementar '
                      f'estrategias de impulso de ventas como promociones o combos.'
         })
     else:
         recomendaciones.append({
             'tipo': 'Positivo',
-            'titulo': 'Pronostico Alineado con la Meta',
-            'texto': f'El pronostico del proximo mes (${pronostico_prox:,.2f}) alcanza el '
+            'titulo': 'Pronóstico Alineado con la Meta',
+            'texto': f'El pronóstico del próximo mes (${pronostico_prox:,.2f}) alcanza el '
                      f'{cumplimiento:.1f}% de la meta. Se recomienda mantener las estrategias actuales.'
         })
 
@@ -146,15 +146,15 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
             'tipo': 'Alerta',
             'titulo': 'Tendencia de Ventas a la Baja',
             'texto': f'El promedio pronosticado (${pronostico_promedio:,.2f}) es inferior al promedio '
-                     f'historico (${historico_promedio:,.2f}). Se sugiere revisar factores como cambios '
-                     f'en rutas aereas, competencia o estacionalidad.'
+                     f'histórico (${historico_promedio:,.2f}). Se sugiere revisar factores como cambios '
+                     f'en rutas aéreas, competencia o estacionalidad.'
         })
     else:
         recomendaciones.append({
             'tipo': 'Positivo',
             'titulo': 'Tendencia de Ventas Estable o al Alza',
             'texto': f'El promedio pronosticado (${pronostico_promedio:,.2f}) se mantiene alineado o '
-                     f'por encima del promedio historico (${historico_promedio:,.2f}).'
+                     f'por encima del promedio histórico (${historico_promedio:,.2f}).'
         })
 
     # --- Regla 3: Concentración de productos (Pareto) ---
@@ -166,8 +166,8 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
     top5 = ", ".join(df_pareto['D_ITEM'].head(5).tolist())
 
     recomendaciones.append({
-        'tipo': 'Estrategico',
-        'titulo': 'Concentracion de Productos (Pareto)',
+        'tipo': 'Estratégico',
+        'titulo': 'Concentración de Productos (Pareto)',
         'texto': f'El 80% de las ventas se concentra en {n_80} de {total_prod} productos '
                  f'({(n_80/total_prod*100):.1f}%). Los 5 principales son: {top5}. '
                  f'Se recomienda asegurar el abastecimiento de estos productos clave.'
@@ -180,9 +180,9 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
 
     recomendaciones.append({
         'tipo': 'Operativo',
-        'titulo': 'Productos de Baja Rotacion',
+        'titulo': 'Productos de Baja Rotación',
         'texto': f'Se identificaron {n_baja_rotacion} productos con ventas por debajo del percentil 10 '
-                 f'(menos de ${umbral_bajo:,.2f} en el periodo). Evaluar si conviene discontinuarlos '
+                 f'(menos de ${umbral_bajo:,.2f} en el período). Evaluar si conviene discontinuarlos '
                  f'para liberar espacio en inventario.'
     })
 
@@ -195,24 +195,57 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
 
         recomendaciones.append({
             'tipo': 'Operativo',
-            'titulo': 'Optimizacion de Personal por Horario',
+            'titulo': 'Optimización de Personal por Horario',
             'texto': f'El {pct_pico:.0f}% de las ventas se concentra en las horas: {horas_texto}. '
-                     f'Se identifican dos picos principales (manana y tarde), coincidentes con los '
-                     f'horarios de mayor flujo de vuelos. Reforzar la dotacion de personal en estas '
-                     f'horas especificas.'
+                     f'Se identifican dos picos principales (mañana y tarde), coincidentes con los '
+                     f'horarios de mayor flujo de vuelos. Reforzar la dotación de personal en estas '
+                     f'horas específicas.'
         })
 
     # --- Regla 6: Mejor modelo ---
     mejor = df_comparacion.loc[df_comparacion['MAE'].idxmin()]
     recomendaciones.append({
-        'tipo': 'Estrategico',
-        'titulo': 'Precision del Modelo Predictivo',
+        'tipo': 'Estratégico',
+        'titulo': 'Precisión del Modelo Predictivo',
         'texto': f'El modelo {mejor["Modelo"]} obtuvo un MAPE de {mejor["MAPE"]:.2f}%, lo cual indica '
-                 f'un margen de error aceptable para la planificacion. Se recomienda re-entrenar el '
-                 f'modelo mensualmente con datos actualizados para mantener su precision.'
+                 f'un margen de error aceptable para la planificación. Se recomienda re-entrenar el '
+                 f'modelo mensualmente con datos actualizados para mantener su precisión.'
     })
 
     return recomendaciones
+
+
+def _setup_pdf_fonts(pdf):
+    """Configura fuentes Unicode (DejaVu Sans) para el PDF con soporte de tildes y ñ."""
+    # Buscar las fuentes en el directorio fonts/ del proyecto
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    fonts_dir = os.path.join(base_dir, 'fonts')
+
+    # Si no están en el proyecto, buscar en matplotlib
+    if not os.path.exists(os.path.join(fonts_dir, 'DejaVuSans.ttf')):
+        try:
+            import matplotlib
+            mpl_fonts = os.path.join(os.path.dirname(matplotlib.__file__), 'mpl-data', 'fonts', 'ttf')
+            fonts_dir = mpl_fonts
+        except Exception:
+            return False
+
+    regular = os.path.join(fonts_dir, 'DejaVuSans.ttf')
+    bold = os.path.join(fonts_dir, 'DejaVuSans-Bold.ttf')
+    italic = os.path.join(fonts_dir, 'DejaVuSans-Oblique.ttf')
+
+    if os.path.exists(regular):
+        pdf.add_font('DejaVu', '', regular, uni=True)
+    else:
+        return False
+
+    if os.path.exists(bold):
+        pdf.add_font('DejaVu', 'B', bold, uni=True)
+
+    if os.path.exists(italic):
+        pdf.add_font('DejaVu', 'I', italic, uni=True)
+
+    return True
 
 
 def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
@@ -234,15 +267,14 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         alerta_cumplimiento, top_n, patron_horario_df
     )
 
-    # --- Generar gráficos con matplotlib (no necesita Kaleido ni Chrome) ---
+    # --- Generar gráficos con matplotlib ---
     tmp_dir = tempfile.mkdtemp()
     chart_files = {}
 
     try:
-        # Obtener datos históricos mensuales para el gráfico de pronóstico
-        df_mensual_hist = df_limpios.groupby(df_limpios['FECHA_NEGOCIO'].dt.to_period('M')).agg(
-            y=('D_VALOR', 'sum')
-        ).reset_index()
+        df_mensual_hist = df_limpios.groupby(
+            df_limpios['FECHA_NEGOCIO'].dt.to_period('M')
+        )['D_VALOR'].sum().reset_index()
         df_mensual_hist.columns = ['ds', 'y']
         df_mensual_hist['ds'] = df_mensual_hist['ds'].dt.to_timestamp()
 
@@ -271,30 +303,37 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
 
     # --- Crear PDF con fpdf2 ---
     pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=20)
+    pdf.set_auto_page_break(auto=True, margin=25)
+
+    # Configurar fuente Unicode
+    has_unicode = _setup_pdf_fonts(pdf)
+    FONT = 'DejaVu' if has_unicode else 'Helvetica'
+
     pdf.add_page()
 
+    # ========== PÁGINA 1: Portada + KPIs + Pronóstico ==========
+
     # Encabezado
-    pdf.set_font('Helvetica', 'B', 20)
+    pdf.set_font(FONT, 'B', 20)
     pdf.set_text_color(46, 134, 171)
-    pdf.cell(0, 12, 'Reporte Ejecutivo de Ventas y Pronostico', new_x="LMARGIN", new_y="NEXT", align='C')
-    pdf.set_font('Helvetica', '', 10)
+    pdf.cell(0, 12, 'Reporte Ejecutivo de Ventas y Pronóstico', new_x="LMARGIN", new_y="NEXT", align='C')
+    pdf.set_font(FONT, '', 10)
     pdf.set_text_color(100, 100, 100)
     pdf.cell(0, 6, f'Generado el: {fecha_gen}', new_x="LMARGIN", new_y="NEXT", align='C')
-    pdf.cell(0, 6, f'Periodo del Pronostico: {periodo}', new_x="LMARGIN", new_y="NEXT", align='C')
+    pdf.cell(0, 6, f'Período del Pronóstico: {periodo}', new_x="LMARGIN", new_y="NEXT", align='C')
     pdf.set_draw_color(46, 134, 171)
     pdf.set_line_width(1)
     pdf.line(10, pdf.get_y() + 3, 200, pdf.get_y() + 3)
     pdf.ln(10)
 
     # --- Resumen Ejecutivo (KPIs) ---
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Resumen Ejecutivo', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
     kpi_data = [
-        ('Pronostico Prox. Mes', f'${pronostico_prox:,.2f}'),
+        ('Pronóstico Próx. Mes', f'${pronostico_prox:,.2f}'),
         ('Meta de Ventas', f'${meta_ventas:,.2f}'),
         ('Cumplimiento', f'{cumplimiento:.1f}%'),
         ('Promedio Hist. Mensual', f'${promedio_hist:,.2f}')
@@ -311,11 +350,11 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.set_fill_color(241, 143, 1)
         pdf.rect(x, pdf.get_y(), 2, 18, style='F')
         pdf.set_xy(x + 4, pdf.get_y() + 2)
-        pdf.set_font('Helvetica', '', 7)
+        pdf.set_font(FONT, '', 7)
         pdf.set_text_color(136, 136, 136)
         pdf.cell(col_width - 6, 4, label, new_x="LMARGIN", new_y="NEXT")
         pdf.set_xy(x + 4, pdf.get_y())
-        pdf.set_font('Helvetica', 'B', 11)
+        pdf.set_font(FONT, 'B', 11)
         if 'Cumplimiento' in label:
             if cumplimiento >= alerta_cumplimiento:
                 pdf.set_text_color(21, 87, 36)
@@ -328,35 +367,39 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.ln(22)
 
     # --- Gráfico de Pronóstico ---
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
-    pdf.cell(0, 10, 'Pronostico de Ventas vs. Historico', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, 'Pronóstico de Ventas vs. Histórico', new_x="LMARGIN", new_y="NEXT")
     if 'pronostico' in chart_files:
         pdf.image(chart_files['pronostico'], x=10, w=190)
-    pdf.ln(5)
+    pdf.ln(3)
+
+    # ========== PÁGINA 2: Comparación de Modelos ==========
+    pdf.add_page()
 
     # --- Tabla de Comparación de Modelos ---
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
-    pdf.cell(0, 10, 'Comparacion de Modelos', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, 'Comparación de Modelos', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_font(FONT, 'B', 9)
     pdf.set_fill_color(46, 134, 171)
     pdf.set_text_color(255, 255, 255)
-    col_widths_models = [40, 50, 50, 50]
-    headers_models = ['Modelo', 'MAE', 'RMSE', 'MAPE']
+    col_widths_models = [35, 35, 40, 40, 40]
+    headers_models = ['Modelo', 'Tipo', 'MAE', 'RMSE', 'MAPE']
     for i, h in enumerate(headers_models):
         pdf.cell(col_widths_models[i], 8, h, border=1, fill=True, align='C')
     pdf.ln()
 
-    pdf.set_font('Helvetica', '', 9)
+    pdf.set_font(FONT, '', 9)
     pdf.set_text_color(51, 51, 51)
     for _, row in df_comparacion.iterrows():
         pdf.cell(col_widths_models[0], 7, str(row['Modelo']), border=1, align='C')
-        pdf.cell(col_widths_models[1], 7, f"${row['MAE']:,.2f}", border=1, align='C')
-        pdf.cell(col_widths_models[2], 7, f"${row['RMSE']:,.2f}", border=1, align='C')
-        pdf.cell(col_widths_models[3], 7, f"{row['MAPE']:.2f}%", border=1, align='C')
+        pdf.cell(col_widths_models[1], 7, str(row.get('Tipo', '')), border=1, align='C')
+        pdf.cell(col_widths_models[2], 7, f"${row['MAE']:,.2f}", border=1, align='C')
+        pdf.cell(col_widths_models[3], 7, f"${row['RMSE']:,.2f}", border=1, align='C')
+        pdf.cell(col_widths_models[4], 7, f"{row['MAPE']:.2f}%", border=1, align='C')
         pdf.ln()
     pdf.ln(5)
 
@@ -367,31 +410,31 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     mejor_rmse = mejor_modelo['RMSE']
     mejor_mape = mejor_modelo['MAPE']
 
-    pdf.set_font('Helvetica', 'B', 11)
+    pdf.set_font(FONT, 'B', 11)
     pdf.set_text_color(46, 134, 171)
     pdf.cell(0, 8, f'Modelo Seleccionado: {mejor_nombre}', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(1)
 
-    pdf.set_font('Helvetica', '', 9)
+    pdf.set_font(FONT, '', 9)
     pdf.set_text_color(51, 51, 51)
 
     # Interpretación del MAE
     pdf.multi_cell(0, 5,
         f'MAE (Error Absoluto Medio): ${mejor_mae:,.2f}. Esto significa que, en promedio, '
         f'el modelo se equivoca en ${mejor_mae:,.2f} por mes respecto al valor real de ventas. '
-        f'Es decir, si el pronostico indica $500,000, las ventas reales podrian estar entre '
+        f'Es decir, si el pronóstico indica $500,000, las ventas reales podrían estar entre '
         f'${500000 - mejor_mae:,.2f} y ${500000 + mejor_mae:,.2f} aproximadamente.')
     pdf.ln(2)
 
     # Interpretación del MAPE
     if mejor_mape <= 10:
-        calidad_mape = 'alta precision (excelente)'
+        calidad_mape = 'alta precisión (excelente)'
     elif mejor_mape <= 20:
-        calidad_mape = 'buena precision (aceptable para planificacion)'
+        calidad_mape = 'buena precisión (aceptable para planificación)'
     elif mejor_mape <= 30:
-        calidad_mape = 'precision moderada (usar con precaucion)'
+        calidad_mape = 'precisión moderada (usar con precaución)'
     else:
-        calidad_mape = 'precision baja (se recomienda revisar los datos o el modelo)'
+        calidad_mape = 'precisión baja (se recomienda revisar los datos o el modelo)'
 
     pdf.multi_cell(0, 5,
         f'MAPE (Error Porcentual Absoluto Medio): {mejor_mape:.2f}%. Esto indica que el modelo '
@@ -402,25 +445,25 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     # Interpretación del Cumplimiento
     if cumplimiento < 70:
         texto_cumpl = (
-            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
-            f'(${pronostico_prox:,.2f}) esta significativamente por debajo de la meta '
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronóstico del próximo mes '
+            f'(${pronostico_prox:,.2f}) está significativamente por debajo de la meta '
             f'(${meta_ventas:,.2f}). Esto puede deberse a estacionalidad (meses de baja demanda '
-            f'como febrero o septiembre), reduccion en el flujo de pasajeros, o a que la meta '
-            f'necesita ajustarse segun el patron historico de ventas.')
+            f'como febrero o septiembre), reducción en el flujo de pasajeros, o a que la meta '
+            f'necesita ajustarse según el patrón histórico de ventas.')
     elif cumplimiento < 90:
         texto_cumpl = (
-            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
-            f'(${pronostico_prox:,.2f}) esta ligeramente por debajo de la meta '
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronóstico del próximo mes '
+            f'(${pronostico_prox:,.2f}) está ligeramente por debajo de la meta '
             f'(${meta_ventas:,.2f}). Se recomienda implementar estrategias de impulso como '
             f'promociones o combos para cerrar la brecha.')
     elif cumplimiento <= 110:
         texto_cumpl = (
-            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
-            f'(${pronostico_prox:,.2f}) esta alineado con la meta (${meta_ventas:,.2f}). '
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronóstico del próximo mes '
+            f'(${pronostico_prox:,.2f}) está alineado con la meta (${meta_ventas:,.2f}). '
             f'Se recomienda mantener las estrategias actuales.')
     else:
         texto_cumpl = (
-            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronostico del proximo mes '
+            f'Cumplimiento Proyectado: {cumplimiento:.1f}%. El pronóstico del próximo mes '
             f'(${pronostico_prox:,.2f}) supera la meta (${meta_ventas:,.2f}). Esto es '
             f'consistente con meses de alta temporada (como julio). Considerar ajustar la meta '
             f'al alza o aprovechar el excedente para reforzar inventario.')
@@ -433,30 +476,29 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         rango_inf = df_pronostico['yhat_lower'].iloc[0]
         rango_sup = df_pronostico['yhat_upper'].iloc[0]
         pdf.multi_cell(0, 5,
-            f'Intervalo de Confianza (95%): Para el proximo mes, las ventas se estiman entre '
-            f'${rango_inf:,.2f} (limite inferior) y ${rango_sup:,.2f} (limite superior). '
+            f'Intervalo de Confianza (95%): Para el próximo mes, las ventas se estiman entre '
+            f'${rango_inf:,.2f} (límite inferior) y ${rango_sup:,.2f} (límite superior). '
             f'Esto significa que existe un 95% de probabilidad de que las ventas reales '
             f'se encuentren dentro de este rango.')
         pdf.ln(2)
 
-    pdf.ln(3)
-
     # --- Tabla de Pronóstico ---
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.ln(3)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
-    pdf.cell(0, 10, f'Tabla de Pronostico a {len(df_pronostico)} Meses', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, f'Tabla de Pronóstico a {len(df_pronostico)} Meses', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(2)
 
-    pdf.set_font('Helvetica', 'B', 9)
+    pdf.set_font(FONT, 'B', 9)
     pdf.set_fill_color(46, 134, 171)
     pdf.set_text_color(255, 255, 255)
     col_widths_pron = [35, 50, 50, 50]
-    headers_pron = ['Mes', 'Pronostico ($)', 'Limite Inferior', 'Limite Superior']
+    headers_pron = ['Mes', 'Pronóstico ($)', 'Límite Inferior', 'Límite Superior']
     for i, h in enumerate(headers_pron):
         pdf.cell(col_widths_pron[i], 8, h, border=1, fill=True, align='C')
     pdf.ln()
 
-    pdf.set_font('Helvetica', '', 9)
+    pdf.set_font(FONT, '', 9)
     pdf.set_text_color(51, 51, 51)
     for _, row in df_pronostico.iterrows():
         lower = f"${row['yhat_lower']:,.2f}" if pd.notna(row.get('yhat_lower')) else "N/A"
@@ -466,37 +508,37 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.cell(col_widths_pron[2], 7, lower, border=1, align='C')
         pdf.cell(col_widths_pron[3], 7, upper, border=1, align='C')
         pdf.ln()
-    pdf.ln(5)
+    pdf.ln(3)
 
-    # --- Gráfico Top Productos ---
+    # ========== PÁGINA 3: Análisis de Productos y Patrón Horario ==========
     pdf.add_page()
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
-    pdf.cell(0, 10, 'Analisis de Productos', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, 'Análisis de Productos', new_x="LMARGIN", new_y="NEXT")
     if 'top_productos' in chart_files:
         pdf.image(chart_files['top_productos'], x=10, w=190)
-    pdf.ln(5)
+    pdf.ln(3)
 
     # --- Gráfico Patrón Horario ---
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
-    pdf.cell(0, 10, 'Analisis Operativo: Patron Horario', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, 'Análisis Operativo: Patrón Horario', new_x="LMARGIN", new_y="NEXT")
     if 'patron_horario' in chart_files:
         pdf.image(chart_files['patron_horario'], x=10, w=190)
-    pdf.ln(5)
+    pdf.ln(3)
 
-    # --- Gráfico Año sobre Año ---
+    # ========== PÁGINA 4: Año sobre Año ==========
     pdf.add_page()
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
-    pdf.cell(0, 10, 'Comparacion Ano sobre Ano', new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 10, 'Comparación Año sobre Año', new_x="LMARGIN", new_y="NEXT")
     if 'yoy' in chart_files:
         pdf.image(chart_files['yoy'], x=10, w=190)
     pdf.ln(5)
 
-    # --- Recomendaciones ---
+    # ========== PÁGINA 5: Recomendaciones ==========
     pdf.add_page()
-    pdf.set_font('Helvetica', 'B', 14)
+    pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Recomendaciones', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(3)
@@ -504,13 +546,13 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     color_map = {
         'Positivo': (212, 237, 218),
         'Alerta': (248, 215, 218),
-        'Estrategico': (204, 229, 255),
+        'Estratégico': (204, 229, 255),
         'Operativo': (255, 243, 205)
     }
     text_color_map = {
         'Positivo': (21, 87, 36),
         'Alerta': (114, 28, 36),
-        'Estrategico': (0, 64, 133),
+        'Estratégico': (0, 64, 133),
         'Operativo': (133, 100, 4)
     }
 
@@ -521,23 +563,28 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
 
         pdf.set_fill_color(*bg)
         pdf.set_text_color(*tc)
-        pdf.set_font('Helvetica', 'B', 10)
+        pdf.set_font(FONT, 'B', 10)
         pdf.cell(0, 8, f"  {rec['titulo']}", new_x="LMARGIN", new_y="NEXT", fill=True, border=1)
 
         pdf.set_fill_color(250, 250, 250)
         pdf.set_text_color(51, 51, 51)
-        pdf.set_font('Helvetica', '', 9)
+        pdf.set_font(FONT, '', 9)
         pdf.multi_cell(0, 5, f"  {rec['texto']}", border=1, fill=True)
         pdf.ln(3)
 
-    # Footer
-    pdf.ln(10)
-    pdf.set_font('Helvetica', 'I', 8)
-    pdf.set_text_color(153, 153, 153)
-    pdf.cell(0, 5, 'Reporte generado automaticamente por el Sistema de Inteligencia de Negocios',
-             align='C', new_x="LMARGIN", new_y="NEXT")
-    pdf.cell(0, 5, 'Los pronosticos son estimaciones basadas en datos historicos y estan sujetos a variabilidad.',
-             align='C')
+    # ========== PIE DE PÁGINA EN TODAS LAS PÁGINAS ==========
+    total_pages = pdf.page
+    for page_num in range(1, total_pages + 1):
+        pdf.page = page_num
+        pdf.set_y(-20)
+        pdf.set_font(FONT, 'I', 8)
+        pdf.set_text_color(153, 153, 153)
+        pdf.cell(0, 5, 'Reporte generado automáticamente por el Sistema de Inteligencia de Negocios',
+                 align='C', new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(95, 5,
+                 'Los pronósticos son estimaciones basadas en datos históricos y están sujetos a variabilidad.',
+                 align='L')
+        pdf.cell(95, 5, f'Página {page_num} de {total_pages}', align='R')
 
     # Exportar a buffer
     pdf_buffer = io.BytesIO()
