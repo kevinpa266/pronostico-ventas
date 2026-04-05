@@ -227,11 +227,26 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
             results_sarima_fit = model_sarima.fit(disp=False)
             forecast_sarima = results_sarima_fit.get_forecast(steps=n_test)
 
+            # Extraer predicciones y conf_int de forma segura (pueden ser ndarray o DataFrame)
+            sarima_pred_mean = forecast_sarima.predicted_mean
+            if hasattr(sarima_pred_mean, 'values'):
+                sarima_pred_mean = sarima_pred_mean.values
+            sarima_pred_mean = np.array(sarima_pred_mean).flatten()
+
+            sarima_ci = forecast_sarima.conf_int()
+            if hasattr(sarima_ci, 'iloc'):
+                sarima_lower = sarima_ci.iloc[:, 0].values
+                sarima_upper = sarima_ci.iloc[:, 1].values
+            else:
+                sarima_ci = np.array(sarima_ci)
+                sarima_lower = sarima_ci[:, 0]
+                sarima_upper = sarima_ci[:, 1]
+
             results['SARIMA'] = {
                 'y_true': test['y'].values,
-                'y_pred': forecast_sarima.predicted_mean.values,
-                'y_lower': forecast_sarima.conf_int().iloc[:, 0].values,
-                'y_upper': forecast_sarima.conf_int().iloc[:, 1].values,
+                'y_pred': sarima_pred_mean,
+                'y_lower': sarima_lower,
+                'y_upper': sarima_upper,
                 'has_ci': True,
                 'order': best_order,
                 'seasonal_order': best_seasonal_order,
@@ -556,11 +571,26 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
         fit_final = model_final.fit(disp=False)
         forecast_final = fit_final.get_forecast(steps=horizonte)
 
+        # Extraer de forma segura (pueden ser ndarray o DataFrame)
+        sarima_final_mean = forecast_final.predicted_mean
+        if hasattr(sarima_final_mean, 'values'):
+            sarima_final_mean = sarima_final_mean.values
+        sarima_final_mean = np.array(sarima_final_mean).flatten()
+
+        sarima_final_ci = forecast_final.conf_int()
+        if hasattr(sarima_final_ci, 'iloc'):
+            sarima_final_lower = sarima_final_ci.iloc[:, 0].values
+            sarima_final_upper = sarima_final_ci.iloc[:, 1].values
+        else:
+            sarima_final_ci = np.array(sarima_final_ci)
+            sarima_final_lower = sarima_final_ci[:, 0]
+            sarima_final_upper = sarima_final_ci[:, 1]
+
         df_pronostico = pd.DataFrame({
             'ds': future_dates,
-            'yhat': forecast_final.predicted_mean.values,
-            'yhat_lower': forecast_final.conf_int().iloc[:, 0].values.clip(min=0),
-            'yhat_upper': forecast_final.conf_int().iloc[:, 1].values
+            'yhat': sarima_final_mean,
+            'yhat_lower': np.clip(sarima_final_lower, 0, None),
+            'yhat_upper': sarima_final_upper
         })
 
     elif best_model_name == 'Prophet':
