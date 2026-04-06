@@ -618,11 +618,15 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.ln(3)
 
     # ========== Análisis de Productos y Patrón Horario ==========
-    # Sin add_page() forzado: el contenido fluye naturalmente después de la tabla
-    pdf.ln(3)
-    pdf.set_draw_color(200, 200, 200)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(3)
+    # Verificar si hay espacio suficiente para título + texto + gráfico (~120mm)
+    espacio_disponible = pdf.h - pdf.b_margin - pdf.get_y()
+    if espacio_disponible < 120:
+        pdf.add_page()
+    else:
+        pdf.ln(3)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(3)
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 8, 'Análisis de Productos', new_x="LMARGIN", new_y="NEXT")
@@ -644,6 +648,10 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.ln(3)
 
     # --- Gráfico Patrón Horario ---
+    # Verificar espacio para título + texto + gráfico (~120mm)
+    espacio_disponible = pdf.h - pdf.b_margin - pdf.get_y()
+    if espacio_disponible < 120:
+        pdf.add_page()
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 8, 'Análisis Operativo: Patrón Horario', new_x="LMARGIN", new_y="NEXT")
@@ -664,11 +672,15 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.ln(2)
 
     # ========== Año sobre Año ==========
-    # Sin add_page() forzado: fluye naturalmente
-    pdf.ln(3)
-    pdf.set_draw_color(200, 200, 200)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(3)
+    # Verificar espacio para título + texto + gráfico (~120mm)
+    espacio_disponible = pdf.h - pdf.b_margin - pdf.get_y()
+    if espacio_disponible < 120:
+        pdf.add_page()
+    else:
+        pdf.ln(3)
+        pdf.set_draw_color(200, 200, 200)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+        pdf.ln(3)
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 8, 'Comparación Año sobre Año', new_x="LMARGIN", new_y="NEXT")
