@@ -253,29 +253,34 @@ def _setup_pdf_fonts(pdf):
     return True
 
 
-def _add_header_footer(pdf, FONT):
-    """Agrega encabezado y pie de página a todas las páginas del PDF."""
-    total_pages = pdf.page
-    for page_num in range(1, total_pages + 1):
-        pdf.page = page_num
-        # Pie de página (footer) - posición fija al fondo
-        pdf.set_y(-20)
-        pdf.set_font(FONT, 'I', 7)
-        pdf.set_text_color(180, 180, 180)
-        pdf.cell(0, 4, 'Reporte generado automáticamente por el Sistema de Inteligencia de Negocios',
-                 align='C', new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(95, 4,
-                 'Los pronósticos son estimaciones basadas en datos históricos y están sujetos a variabilidad.',
-                 align='L')
-        pdf.cell(95, 4, f'Página {page_num} de {total_pages}', align='R')
+class ReportPDF:
+    """Clase helper para crear un FPDF con footer nativo que no se superpone."""
+
+    @staticmethod
+    def create(FONT):
+        """Crea una instancia de FPDF con footer automático."""
+        from fpdf import FPDF
+
+        class _PDF(FPDF):
+            def footer(self):
+                self.set_y(-12)
+                self.set_font(FONT, 'I', 6)
+                self.set_text_color(190, 190, 190)
+                self.cell(95, 3,
+                          'Reporte generado por el Sistema de Inteligencia de Negocios. '
+                          'Los pronósticos son estimaciones sujetas a variabilidad.',
+                          align='L')
+                self.cell(95, 3, f'Página {self.page_no()} de {{nb}}', align='R')
+
+        pdf = _PDF()
+        pdf.alias_nb_pages()
+        return pdf
 
 
 def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
                     meta_ventas, alerta_cumplimiento, df_limpios, top_n, st_ref,
                     best_model_name=None):
     """Genera el reporte ejecutivo en PDF usando fpdf2 y matplotlib para gráficos."""
-    from fpdf import FPDF
-
     st_ref.write("Generando reporte ejecutivo...")
 
     # Obtener patrón horario
@@ -336,13 +341,20 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     mejor_rmse = mejor_modelo['RMSE']
     mejor_mape = mejor_modelo['MAPE']
 
-    # --- Crear PDF con fpdf2 ---
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=25)
-
-    # Configurar fuente Unicode
-    has_unicode = _setup_pdf_fonts(pdf)
+    # --- Crear PDF con fpdf2 (subclase con footer nativo) ---
+    # Primero detectar fuente disponible
+    from fpdf import FPDF as _TempFPDF
+    _temp = _TempFPDF()
+    has_unicode = _setup_pdf_fonts(_temp)
     FONT = 'DejaVu' if has_unicode else 'Helvetica'
+    del _temp
+
+    # Crear PDF con footer automático
+    pdf = ReportPDF.create(FONT)
+    pdf.set_auto_page_break(auto=True, margin=18)
+
+    # Configurar fuente Unicode en la instancia real
+    _setup_pdf_fonts(pdf)
 
     pdf.add_page()
 
@@ -715,8 +727,7 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.multi_cell(0, 5, f"  {rec['texto']}", border=1, fill=True)
         pdf.ln(3)
 
-    # ========== PIE DE PÁGINA EN TODAS LAS PÁGINAS ==========
-    _add_header_footer(pdf, FONT)
+    # El footer se genera automáticamente por la subclase _PDF
 
     # Exportar a buffer
     pdf_buffer = io.BytesIO()

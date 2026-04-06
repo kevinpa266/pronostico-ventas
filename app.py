@@ -288,11 +288,15 @@ if uploaded_file is not None and len(modelos_seleccionados) >= 1:
 
             # Tabla comparativa de modelos
             st.subheader("Comparación de Modelos")
+            def _highlight_best_model(row):
+                if row['Modelo'] == best_model_name:
+                    return ['background-color: #d4edda'] * len(row)
+                return [''] * len(row)
             st.dataframe(df_comparacion.style.format({
                 'MAE': '${:,.2f}',
                 'RMSE': '${:,.2f}',
                 'MAPE': '{:.2f}%'
-            }).highlight_min(subset=['MAE', 'RMSE', 'MAPE'], color='#d4edda'), use_container_width=True)
+            }).apply(_highlight_best_model, axis=1), use_container_width=True)
 
             # Tabla de pronóstico
             st.subheader("Pronóstico Detallado")

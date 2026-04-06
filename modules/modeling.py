@@ -468,7 +468,7 @@ def run_modeling(df_mensual, horizonte, st_ref, modelos_keys=None):
         'MAE': '${:,.2f}',
         'RMSE': '${:,.2f}',
         'MAPE': '{:.2f}%'
-    }).highlight_min(subset=['MAE', 'RMSE', 'MAPE'], color='#d4edda'))
+    }))
 
     # =============================================
     # SELECCIÓN DEL MEJOR MODELO (con principio de parsimonia)
