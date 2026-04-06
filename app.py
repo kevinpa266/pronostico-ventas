@@ -320,7 +320,7 @@ if uploaded_file is not None and len(modelos_seleccionados) >= 1:
 
             # --- 5. Generación de Reporte ---
             st.write("### 4. Generación de Reporte PDF")
-            pdf_buffer = generate_report(df_pronostico_final, df_comparacion, figs_eda, figs_modelos, meta_ventas, alerta_cumplimiento, df_limpios, top_n_productos, st)
+            pdf_buffer = generate_report(df_pronostico_final, df_comparacion, figs_eda, figs_modelos, meta_ventas, alerta_cumplimiento, df_limpios, top_n_productos, st, best_model_name=best_model_name)
 
             st.download_button(
                 label="Descargar Reporte Ejecutivo en PDF",

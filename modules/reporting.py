@@ -113,7 +113,7 @@ def _plot_yoy(df_limpios, tmp_dir):
 
 
 def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ventas,
-                             alerta_cumplimiento, top_n, patron_horario_df):
+                             alerta_cumplimiento, top_n, patron_horario_df, best_model_name=None):
     """Genera recomendaciones basadas en reglas de negocio."""
     recomendaciones = []
 
@@ -203,7 +203,12 @@ def generate_recommendations(df_pronostico, df_comparacion, df_limpios, meta_ven
         })
 
     # --- Regla 6: Mejor modelo ---
-    mejor = df_comparacion.loc[df_comparacion['MAE'].idxmin()]
+    # FIX: Usar best_model_name del criterio de parsimonia en vez de buscar el menor MAE
+    if best_model_name and best_model_name in df_comparacion['Modelo'].values:
+        mejor = df_comparacion[df_comparacion['Modelo'] == best_model_name].iloc[0]
+    else:
+        mejor = df_comparacion.loc[df_comparacion['MAE'].idxmin()]
+
     recomendaciones.append({
         'tipo': 'Estratégico',
         'titulo': 'Precisión del Modelo Predictivo',
@@ -248,8 +253,26 @@ def _setup_pdf_fonts(pdf):
     return True
 
 
+def _add_header_footer(pdf, FONT):
+    """Agrega encabezado y pie de página a todas las páginas del PDF."""
+    total_pages = pdf.page
+    for page_num in range(1, total_pages + 1):
+        pdf.page = page_num
+        # Pie de página (footer) - posición fija al fondo
+        pdf.set_y(-20)
+        pdf.set_font(FONT, 'I', 7)
+        pdf.set_text_color(180, 180, 180)
+        pdf.cell(0, 4, 'Reporte generado automáticamente por el Sistema de Inteligencia de Negocios',
+                 align='C', new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(95, 4,
+                 'Los pronósticos son estimaciones basadas en datos históricos y están sujetos a variabilidad.',
+                 align='L')
+        pdf.cell(95, 4, f'Página {page_num} de {total_pages}', align='R')
+
+
 def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
-                    meta_ventas, alerta_cumplimiento, df_limpios, top_n, st_ref):
+                    meta_ventas, alerta_cumplimiento, df_limpios, top_n, st_ref,
+                    best_model_name=None):
     """Genera el reporte ejecutivo en PDF usando fpdf2 y matplotlib para gráficos."""
     from fpdf import FPDF
 
@@ -261,10 +284,10 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         patron_horario_df = df_limpios.groupby('hora')['D_VALOR'].sum().reset_index()
         patron_horario_df.columns = ['hora', 'ventas_total']
 
-    # Generar recomendaciones
+    # Generar recomendaciones (ahora con best_model_name)
     recomendaciones = generate_recommendations(
         df_pronostico, df_comparacion, df_limpios, meta_ventas,
-        alerta_cumplimiento, top_n, patron_horario_df
+        alerta_cumplimiento, top_n, patron_horario_df, best_model_name
     )
 
     # --- Generar gráficos con matplotlib ---
@@ -301,6 +324,18 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     fecha_gen = datetime.now().strftime('%Y-%m-%d %H:%M')
     periodo = f"{df_pronostico['ds'].iloc[0].strftime('%Y-%m')} a {df_pronostico['ds'].iloc[-1].strftime('%Y-%m')}"
 
+    # --- Determinar el modelo seleccionado ---
+    # FIX: Usar best_model_name del criterio de parsimonia
+    if best_model_name and best_model_name in df_comparacion['Modelo'].values:
+        mejor_modelo = df_comparacion[df_comparacion['Modelo'] == best_model_name].iloc[0]
+    else:
+        mejor_modelo = df_comparacion.loc[df_comparacion['MAE'].idxmin()]
+
+    mejor_nombre = mejor_modelo['Modelo']
+    mejor_mae = mejor_modelo['MAE']
+    mejor_rmse = mejor_modelo['RMSE']
+    mejor_mape = mejor_modelo['MAPE']
+
     # --- Crear PDF con fpdf2 ---
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=25)
@@ -330,7 +365,18 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Resumen Ejecutivo', new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
+    pdf.ln(1)
+
+    # Explicación de la sección
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'Esta sección presenta los indicadores clave de rendimiento (KPIs) del sistema de pronóstico. '
+        'El "Pronóstico Próx. Mes" es la estimación de ventas generada por el modelo de inteligencia artificial. '
+        'La "Meta de Ventas" es el objetivo comercial definido por la gerencia. El "Cumplimiento" indica '
+        'qué porcentaje de la meta se espera alcanzar. El "Promedio Hist. Mensual" es el promedio de ventas '
+        'de todos los meses del historial, y sirve como referencia de la tendencia general.')
+    pdf.ln(3)
 
     kpi_data = [
         ('Pronóstico Próx. Mes', f'${pronostico_prox:,.2f}'),
@@ -341,19 +387,20 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
 
     col_width = 45
     start_x = 10
+    kpi_y = pdf.get_y()
     for i, (label, value) in enumerate(kpi_data):
         x = start_x + i * col_width
-        pdf.set_xy(x, pdf.get_y())
+        pdf.set_xy(x, kpi_y)
         pdf.set_fill_color(249, 249, 249)
         pdf.set_draw_color(241, 143, 1)
-        pdf.rect(x, pdf.get_y(), col_width - 2, 18, style='DF')
+        pdf.rect(x, kpi_y, col_width - 2, 18, style='DF')
         pdf.set_fill_color(241, 143, 1)
-        pdf.rect(x, pdf.get_y(), 2, 18, style='F')
-        pdf.set_xy(x + 4, pdf.get_y() + 2)
+        pdf.rect(x, kpi_y, 2, 18, style='F')
+        pdf.set_xy(x + 4, kpi_y + 2)
         pdf.set_font(FONT, '', 7)
         pdf.set_text_color(136, 136, 136)
         pdf.cell(col_width - 6, 4, label, new_x="LMARGIN", new_y="NEXT")
-        pdf.set_xy(x + 4, pdf.get_y())
+        pdf.set_xy(x + 4, kpi_y + 6)
         pdf.set_font(FONT, 'B', 11)
         if 'Cumplimiento' in label:
             if cumplimiento >= alerta_cumplimiento:
@@ -364,12 +411,23 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
             pdf.set_text_color(51, 51, 51)
         pdf.cell(col_width - 6, 6, value)
 
-    pdf.ln(22)
+    pdf.set_y(kpi_y + 22)
 
     # --- Gráfico de Pronóstico ---
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Pronóstico de Ventas vs. Histórico', new_x="LMARGIN", new_y="NEXT")
+
+    # Explicación del gráfico
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'El siguiente gráfico muestra la serie temporal de ventas históricas (línea azul) junto con el '
+        'pronóstico generado por el modelo (línea naranja punteada). La zona sombreada representa el '
+        'intervalo de confianza al 95%, es decir, el rango dentro del cual se espera que las ventas '
+        'reales se ubiquen con un 95% de probabilidad.')
+    pdf.ln(2)
+
     if 'pronostico' in chart_files:
         pdf.image(chart_files['pronostico'], x=10, w=190)
     pdf.ln(3)
@@ -381,7 +439,18 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Comparación de Modelos', new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
+    pdf.ln(1)
+
+    # Explicación de la sección
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'Se evaluaron múltiples modelos predictivos para determinar cuál ofrece el mejor rendimiento. '
+        'Las métricas utilizadas son: MAE (Error Absoluto Medio), que indica en cuántos dólares se '
+        'equivoca el modelo en promedio cada mes; RMSE (Raíz del Error Cuadrático Medio), similar al '
+        'MAE pero penaliza más los errores grandes; y MAPE (Error Porcentual Absoluto Medio), que '
+        'expresa el error como porcentaje. Un MAPE menor al 20% se considera un buen pronóstico.')
+    pdf.ln(3)
 
     pdf.set_font(FONT, 'B', 9)
     pdf.set_fill_color(46, 134, 171)
@@ -395,28 +464,43 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font(FONT, '', 9)
     pdf.set_text_color(51, 51, 51)
     for _, row in df_comparacion.iterrows():
-        pdf.cell(col_widths_models[0], 7, str(row['Modelo']), border=1, align='C')
-        pdf.cell(col_widths_models[1], 7, str(row.get('Tipo', '')), border=1, align='C')
-        pdf.cell(col_widths_models[2], 7, f"${row['MAE']:,.2f}", border=1, align='C')
-        pdf.cell(col_widths_models[3], 7, f"${row['RMSE']:,.2f}", border=1, align='C')
-        pdf.cell(col_widths_models[4], 7, f"{row['MAPE']:.2f}%", border=1, align='C')
+        # Resaltar la fila del modelo seleccionado
+        if row['Modelo'] == mejor_nombre:
+            pdf.set_fill_color(212, 237, 218)  # Verde claro
+            fill = True
+        else:
+            pdf.set_fill_color(255, 255, 255)
+            fill = True
+        pdf.cell(col_widths_models[0], 7, str(row['Modelo']), border=1, align='C', fill=fill)
+        pdf.cell(col_widths_models[1], 7, str(row.get('Tipo', '')), border=1, align='C', fill=fill)
+        pdf.cell(col_widths_models[2], 7, f"${row['MAE']:,.2f}", border=1, align='C', fill=fill)
+        pdf.cell(col_widths_models[3], 7, f"${row['RMSE']:,.2f}", border=1, align='C', fill=fill)
+        pdf.cell(col_widths_models[4], 7, f"{row['MAPE']:.2f}%", border=1, align='C', fill=fill)
         pdf.ln()
     pdf.ln(5)
 
     # --- Interpretación de Métricas ---
-    mejor_modelo = df_comparacion.loc[df_comparacion['MAE'].idxmin()]
-    mejor_nombre = mejor_modelo['Modelo']
-    mejor_mae = mejor_modelo['MAE']
-    mejor_rmse = mejor_modelo['RMSE']
-    mejor_mape = mejor_modelo['MAPE']
-
     pdf.set_font(FONT, 'B', 11)
-    pdf.set_text_color(46, 134, 171)
+    pdf.set_text_color(21, 87, 36)
     pdf.cell(0, 8, f'Modelo Seleccionado: {mejor_nombre}', new_x="LMARGIN", new_y="NEXT")
     pdf.ln(1)
 
     pdf.set_font(FONT, '', 9)
     pdf.set_text_color(51, 51, 51)
+
+    # Explicación de por qué se seleccionó este modelo (criterio de parsimonia)
+    # Verificar si hay un modelo con menor MAE que no sea el seleccionado
+    modelo_menor_mae = df_comparacion.loc[df_comparacion['MAE'].idxmin()]
+    if modelo_menor_mae['Modelo'] != mejor_nombre:
+        diff_pct = abs(modelo_menor_mae['MAE'] - mejor_mae) / modelo_menor_mae['MAE'] * 100
+        pdf.multi_cell(0, 5,
+            f'Nota: El modelo {modelo_menor_mae["Modelo"]} obtuvo un MAE ligeramente menor '
+            f'(${modelo_menor_mae["MAE"]:,.2f}), pero la diferencia con {mejor_nombre} es de solo '
+            f'{diff_pct:.1f}%. Aplicando el principio de parsimonia (Navaja de Occam), cuando dos '
+            f'modelos tienen rendimiento equivalente (diferencia menor al 5%), se selecciona el más '
+            f'simple e interpretable. {mejor_nombre} ofrece mayor transparencia, menor tiempo de '
+            f'entrenamiento y mejor reproducibilidad.')
+        pdf.ln(2)
 
     # Interpretación del MAE
     pdf.multi_cell(0, 5,
@@ -487,7 +571,18 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, f'Tabla de Pronóstico a {len(df_pronostico)} Meses', new_x="LMARGIN", new_y="NEXT")
-    pdf.ln(2)
+    pdf.ln(1)
+
+    # Explicación de la tabla
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'La siguiente tabla detalla el pronóstico mes a mes generado por el modelo seleccionado. '
+        'La columna "Pronóstico ($)" es la estimación puntual de ventas. Las columnas "Límite Inferior" '
+        'y "Límite Superior" definen el intervalo de confianza al 95%: existe un 95% de probabilidad '
+        'de que las ventas reales se ubiquen dentro de este rango. A medida que el horizonte de '
+        'pronóstico se extiende, el intervalo se amplía reflejando mayor incertidumbre.')
+    pdf.ln(3)
 
     pdf.set_font(FONT, 'B', 9)
     pdf.set_fill_color(46, 134, 171)
@@ -515,14 +610,39 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Análisis de Productos', new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    # Explicación de la sección
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'El siguiente gráfico muestra los productos con mayor volumen de ventas en el período analizado, '
+        'ordenados de mayor a menor. Esta visualización aplica el principio de Pareto (regla 80/20): '
+        'un pequeño porcentaje de productos genera la mayor parte de los ingresos. Identificar estos '
+        'productos clave permite priorizar el abastecimiento y evitar quiebres de inventario en los '
+        'artículos más rentables.')
+    pdf.ln(3)
+
     if 'top_productos' in chart_files:
         pdf.image(chart_files['top_productos'], x=10, w=190)
-    pdf.ln(3)
+    pdf.ln(5)
 
     # --- Gráfico Patrón Horario ---
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Análisis Operativo: Patrón Horario', new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    # Explicación de la sección
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'Este gráfico muestra la distribución de ventas acumuladas por hora del día a lo largo de todo '
+        'el período analizado. Las barras más altas indican las horas de mayor actividad comercial. '
+        'Esta información es útil para optimizar la dotación de personal, programar reposición de '
+        'productos y planificar promociones en los horarios de mayor tráfico de clientes.')
+    pdf.ln(3)
+
     if 'patron_horario' in chart_files:
         pdf.image(chart_files['patron_horario'], x=10, w=190)
     pdf.ln(3)
@@ -532,6 +652,19 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Comparación Año sobre Año', new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    # Explicación de la sección
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'Este gráfico compara las ventas mensuales de cada año del historial. Cada línea representa '
+        'un año diferente, lo que permite identificar patrones estacionales recurrentes (por ejemplo, '
+        'meses que siempre tienen ventas altas o bajas) y evaluar si la empresa está creciendo, '
+        'estancándose o decreciendo año tras año. Los meses donde las líneas se separan significativamente '
+        'indican cambios importantes en el comportamiento comercial.')
+    pdf.ln(3)
+
     if 'yoy' in chart_files:
         pdf.image(chart_files['yoy'], x=10, w=190)
     pdf.ln(5)
@@ -541,6 +674,16 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Recomendaciones', new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(1)
+
+    # Explicación de la sección
+    pdf.set_font(FONT, '', 8)
+    pdf.set_text_color(100, 100, 100)
+    pdf.multi_cell(0, 4,
+        'Las siguientes recomendaciones se generan automáticamente a partir del análisis de los datos '
+        'y los resultados del modelo predictivo. Cada recomendación está clasificada por tipo: '
+        '"Positivo" (indicadores favorables), "Alerta" (situaciones que requieren atención), '
+        '"Estratégico" (decisiones de mediano/largo plazo) y "Operativo" (acciones inmediatas).')
     pdf.ln(3)
 
     color_map = {
@@ -573,18 +716,7 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.ln(3)
 
     # ========== PIE DE PÁGINA EN TODAS LAS PÁGINAS ==========
-    total_pages = pdf.page
-    for page_num in range(1, total_pages + 1):
-        pdf.page = page_num
-        pdf.set_y(-20)
-        pdf.set_font(FONT, 'I', 8)
-        pdf.set_text_color(153, 153, 153)
-        pdf.cell(0, 5, 'Reporte generado automáticamente por el Sistema de Inteligencia de Negocios',
-                 align='C', new_x="LMARGIN", new_y="NEXT")
-        pdf.cell(95, 5,
-                 'Los pronósticos son estimaciones basadas en datos históricos y están sujetos a variabilidad.',
-                 align='L')
-        pdf.cell(95, 5, f'Página {page_num} de {total_pages}', align='R')
+    _add_header_footer(pdf, FONT)
 
     # Exportar a buffer
     pdf_buffer = io.BytesIO()
