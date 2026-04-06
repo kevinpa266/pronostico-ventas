@@ -617,8 +617,12 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.ln()
     pdf.ln(3)
 
-    # ========== PÁGINA 3: Análisis de Productos y Patrón Horario ==========
-    pdf.add_page()
+    # ========== Análisis de Productos y Patrón Horario ==========
+    # Sin add_page() forzado: el contenido fluye naturalmente después de la tabla
+    pdf.ln(5)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Análisis de Productos', new_x="LMARGIN", new_y="NEXT")
@@ -659,8 +663,12 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.image(chart_files['patron_horario'], x=10, w=190)
     pdf.ln(3)
 
-    # ========== PÁGINA 4: Año sobre Año ==========
-    pdf.add_page()
+    # ========== Año sobre Año ==========
+    # Sin add_page() forzado: fluye naturalmente
+    pdf.ln(5)
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(5)
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
     pdf.cell(0, 10, 'Comparación Año sobre Año', new_x="LMARGIN", new_y="NEXT")
@@ -681,7 +689,8 @@ def generate_report(df_pronostico, df_comparacion, figs_eda, figs_modelos,
         pdf.image(chart_files['yoy'], x=10, w=190)
     pdf.ln(5)
 
-    # ========== PÁGINA 5: Recomendaciones ==========
+    # ========== Recomendaciones ==========
+    # Recomendaciones siempre en página nueva para claridad
     pdf.add_page()
     pdf.set_font(FONT, 'B', 14)
     pdf.set_text_color(162, 59, 114)
